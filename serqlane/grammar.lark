@@ -1,78 +1,29 @@
-?start: 
+start: line+
 
+?line: expression | assignment
 
+assignment: "let" "mut"? id "=" expression
 
-// Punctuation
-AMPERSAND: "&"
-AMPERSAND_EQ: "&="
-ASTERISK: "*"
-ASTERISK2: "**"
-ASTERISK_EQ: "*="
-CARET: "^"
-CARET_EQ: "^="
-COLON: ":"
-COMMA: ","
-DOT: "."
-DOT2: ".."
-DOT3: "..."
-EQUAL: "="
-EQUAL2: "=="
-EQ_R_ARROW: "=>"
-EXCLAMATION_MARK: "!"
-EXCLAMATION_MARK_EQUAL: "!="
-L_ARROW: "<"
-L_ARROW2: "<<"
-L_ARROW2_EQ: "<<="
-L_ARROW_EQUAL: "<="
-L_BRACE: "{"
-L_BRACKET: "["
-L_PAREN: "("
-MINUS: "-"
-MINUS_EQ: "-="
-MINUS_ARROW: "->"
-PERCENT: "%"
-PERCENT_EQ: "%="
-PIPE: "|"
-PIPE_EQ: "|="
-PLUS: "+"
-PLUS_EQ: "+="
-QUESTION_MARK: "?"
-R_ARROW: ">"
-R_ARROW2: ">>"
-R_ARROW_EQ: ">="
-R_BRACE: "}"
-R_BRACKET: "]"
-R_PAREN: ")"
-SEMICOLON: ";"
-SLASH: "/"
-SLASH_EQ: "/="
-TILDE: "~"
+block: "{" line+ "}"
+?match_block: "{" ((/else/ | expression) "=>" expression ","?)+ "}"
 
-// Keywords
-KW_ALIGN: "align"
-KW_ASYNC: "async"
-KW_AWAIT: "await"
-KW_BREAK: "break"
-KW_CONST: "const"
-KW_CONTINUE: "continue"
-KW_ELSE: "else"
-KW_ENUM: "enum"
-KW_EXTERN: "extern"
-KW_FALSE: "false"
-KW_FN: "fn"
-KW_FOR: "for"
-KW_IF: "if"
-KW_IN: "in"
-KW_LET: "let"
-KW_MATCH: "match"
-KW_MUT: "mut"
-KW_PUB: "pub"
-KW_RETURN: "return"
-KW_SELFTY: "Self"
-KW_SELFVAL: "self"
-KW_STATIC: "static"
-KW_STRUCT: "struct"
-KW_TRUE: "true"
-KW_UNION: "union"
-KW_VIRTUAL: "virtual"
-KW_WHILE: "while"
+?expression: if_block | if_expression | block | literal | id
+
+if_expression: "if" expression block
+
+if_block: "if" match_block
+
+id: /\w[^\s]*/
+
+?literal: bool | number | string
+!bool: "true" | "false"
+number: /\d+/
+string: "\"" /[^"]+/? "\""
+
+COMMENT: /\s*/ "//" /[^\n]/*
+%ignore COMMENT
+
+%ignore /\n/
+
+%import common.WS_INLINE
+%ignore WS_INLINE
