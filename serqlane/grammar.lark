@@ -1,19 +1,57 @@
-start: line+
+start: (function | line)+
 
-?line: expression | assignment
+//start: function
+
+?line: (expression | assignment | return) ";"?
 
 assignment: "let" "mut"? id "=" expression
+
+return: "return" expression
 
 block: "{" line+ "}"
 ?match_block: "{" ((/else/ | expression) "=>" expression ","?)+ "}"
 
-?expression: if_block | if_expression | block | literal | id
+?expression: (uncontained_expression | contained_expression)
+?uncontained_expression: if_block | if_expression | block | literal | id | operation | comparison
+?contained_expression: "(" expression ")"
 
-if_expression: "if" expression block
+if_expression: if_condition (else_if+)? else?
+if_condition: "if" expression (condition_operation+)? block
+else_if: "else" if_condition
+else: "else" block
+
+condition_operation: condition_operator expression
+?condition_operator: and | or
+and: "and"
+or: "or"
 
 if_block: "if" match_block
 
-id: /\w[^\s]*/
+id: /[a-zA-Z](\w|\d)*/
+?id_literal: literal | id
+
+function: "fn" id function_args type block
+?function_args: "(" (typed_arg ","?)+ ")"
+
+typed_arg: id ":" type
+
+type: id ("|" id)? 
+
+operation: id (operator id_literal)+
+?operator: add | sub | divide | multiply | modulus
+add: "+"
+sub: "-"
+divide: "/"
+multiply: "*"
+modulus: "%"
+
+comparison: expression (comparitor id_literal)+
+?comparitor: less | greater | equal | less_or_equal | greater_or_equal
+less: "<"
+greater: ">"
+equal: "=="
+less_or_equal: less "="
+greater_or_equal: greater "="
 
 ?literal: bool | number | string
 !bool: "true" | "false"

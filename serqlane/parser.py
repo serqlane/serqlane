@@ -6,6 +6,7 @@ from lark import Lark
 ROOT = Path(__file__).parent
 GRAMMAR = ROOT / "grammar.lark"
 
+
 class Parser:
     def __init__(self, grammar_file: str | Path = GRAMMAR):
         with open(grammar_file) as fp:
@@ -13,12 +14,10 @@ class Parser:
 
         self.lark = Lark(grammar)
 
-    def parse(self, entry: str, display: bool = False):
+    def parse(self, entry: str, display: bool = True):
         tree = self.lark.parse(entry)
         if display:
             print(tree.pretty())
-
-        return 1
 
 
 if __name__ == "__main__":
@@ -30,7 +29,7 @@ let x = 200
 let mut y = 300
 """
 
-    parser.parse(test_assignment)
+    parser.parse(test_assignment, display=False)
 
     test_conditionals = """
 // if statement
@@ -50,16 +49,32 @@ if {
 let x = "test string 123"
 """
 
-    parser.parse(test_conditionals)
+    parser.parse(test_conditionals, display=False)
 
-    test_functions = """
-fn add(a: u4, b: u4) u4 {
-    a + b
+    test_contained_if = """
+if (input % 3 == 0) and (input % 5 == 0) {
+    "FizzBuzz"
 }
 """
 
+    parser.parse(test_contained_if, display=False)
+
+    test_functions = """
+fn add(a: u4, b: u4) u4 {
+    let x = a + b - "test";
+    a + b - 1
+
+    if {
+        x == 2 => 1,
+        else => 2
+    }
+}
+"""
+
+    parser.parse(test_functions, display=False)
+
     test_fizzbuzz = """
-fn fizz_buzz(input: u4) {
+fn fizz_buzz(input: u4) u4 | str {
     return if (input % 3 == 0) and (input % 5 == 0) {
         "FizzBuzz"
     } else if input % 3 == 0 {
@@ -71,17 +86,7 @@ fn fizz_buzz(input: u4) {
     }
 }
 
-@say(fiz_buzz(7));
+//print(fiz_buzz(7));
 """
 
-#     test_conditionals = """
-# // if block
-# let x = if {
-#     true => 1,
-#     false => 2,
-#     else => 3,
-# };
-
-# // if statement
-# if true { return 1 };
-# """
+    parser.parse(test_fizzbuzz, display=True)
