@@ -7,7 +7,7 @@ ROOT = Path(__file__).parent
 GRAMMAR = ROOT / "grammar.lark"
 
 class Parser:
-    def __init__(self, grammar_file: str = GRAMMAR):
+    def __init__(self, grammar_file: str | Path = GRAMMAR):
         with open(grammar_file) as fp:
             grammar = fp.read()
 
