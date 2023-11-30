@@ -1,67 +1,65 @@
-start: (function | line)+
+start: statement*
 
 //start: function
 
-?line: (expression | assignment | return | define) ";"?
+?statement: (expression | assignment | return | let_stmt | function_definition) terminator?
 
-define: "let" MUT? assignment
+let_stmt: "let" MUT? assignment
 MUT: "mut"
-assignment: id "=" expression
+assignment: identifier "=" expression
 
 return: "return" expression
 
-block: "{" line+ "}"
-?match_block: "{" ((/else/ | expression) "=>" expression ","?)+ "}"
+block: "{" statement* "}"
 
-?expression: (uncontained_expression | contained_expression)
-?uncontained_expression: if_block | if_expression | block | literal | id | operation | comparison | function_call
-?contained_expression: "(" expression ")"
+?expression: if_expression | block | literal | identifier | function_call | binary_expression | unary_expression | grouped_expression
+grouped_expression: "(" expression ")"
 
-function_call: id "(" function_args ")"
-function_args: ((id "=")? expression ","?)+
+function_call: identifier "(" function_args? ")"
+function_args: ((identifier "=")? expression ","?)+
 
 if_expression: if_condition (else_if+)? else?
-if_condition: "if" expression (condition_operation+)? block
+if_condition: "if" expression block
 else_if: "else" if_condition
 else: "else" block
 
-condition_operation: condition_operator expression
-?condition_operator: and | or
+
+binary_expression: expression binary_operator expression
+?binary_operator: or | and | plus | minus | modulus | star | slash | dot
+dot: "."
+star: "*"
+slash: "/"
+minus: "-"
+plus: "+"
+modulus: "%"
 and: "and"
 or: "or"
 
-if_block: "if" match_block
+unary_expression: unary_operator? expression
+?unary_operator: minus | plus | not | ampersand | star
+not: "not"
+ampersand: "&"
 
-id: /[a-zA-Z](\w|\d)*/
-?id_literal: literal | id
 
-function: "fn" id function_def_args type block
+identifier: /[a-zA-Z](\w|\d)*/
+
+function_definition: pub_modifier? "fn" identifier function_def_args type? block
 ?function_def_args: "(" (typed_arg ","?)+ ")"
 
-typed_arg: id ":" type
+pub_modifier: "pub"
 
-type: id ("|" id)? 
+typed_arg: identifier ":" type
 
-operation: id_literal (operator id_literal)+
-operator: add | sub | divide | multiply | modulus
-add: "+"
-sub: "-"
-divide: "/"
-multiply: "*"
-modulus: "%"
+type: ampersand? MUT? identifier 
 
-comparison: expression (comparitor id_literal)+
-?comparitor: less | greater | equal | less_or_equal | greater_or_equal
-less: "<"
-greater: ">"
-equal: "=="
-less_or_equal: less "="
-greater_or_equal: greater "="
-
-literal: bool | number | string
+?literal: bool | number | string
 !bool: "true" | "false"
-number: /\d+/
+number: integer | decimal
+integer: /\d+/
+decimal: integer? "." integer
 string: "\"" /[^"]+/? "\""
+
+terminator: ";"
 
 COMMENT: /\s*/ "//" /[^\n]/*
 %ignore COMMENT
