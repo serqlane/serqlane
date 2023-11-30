@@ -1,10 +1,8 @@
 start: statement*
 
-//start: function
+statement: (expression | assignment | return | let_stmt | function_definition) terminator?
 
-?statement: (expression | assignment | return | let_stmt | function_definition) terminator?
-
-let_stmt: "let" MUT? assignment
+let_stmt: "let" MUT? identifier (":" expression)? "=" expression
 MUT: "mut"
 assignment: identifier "=" expression
 
@@ -12,7 +10,7 @@ return: "return" expression
 
 block: "{" statement* "}"
 
-?expression: if_expression | block | literal | identifier | function_call | binary_expression | unary_expression | grouped_expression
+expression: if_expression | block | literal | identifier | function_call | binary_expression | unary_expression | grouped_expression
 grouped_expression: "(" expression ")"
 
 function_call: identifier "(" function_args? ")"
@@ -44,7 +42,7 @@ ampersand: "&"
 identifier: /[a-zA-Z](\w|\d)*/
 
 function_definition: pub_modifier? "fn" identifier function_def_args type? block
-?function_def_args: "(" (typed_arg ","?)+ ")"
+function_def_args: "(" (typed_arg ","?)+ ")"
 
 pub_modifier: "pub"
 
@@ -54,7 +52,7 @@ type: ampersand? MUT? identifier
 
 ?literal: bool | number | string
 !bool: "true" | "false"
-number: integer | decimal
+?number: integer | decimal
 integer: /\d+/
 decimal: integer? "." integer
 string: "\"" /[^"]+/? "\""

@@ -1,15 +1,64 @@
 from __future__ import annotations
-from typing import Any
+from typing import Any, Optional
 from enum import Enum, auto
 
 import hashlib
 
+import lark.visitors
+from lark import Tree, Token
+
+from serqlane.parser import SerqParser
+
+
+class Node:
+    def __init__(self, type: Type = None) -> None:
+        self.type = type
+
+    def render(self, indent=0) -> str:
+        raise NotImplementedError()
+
+class NodeStmtList(Node):
+    def __init__(self) -> None:
+        super().__init__()
+        self.children: list[Node] = []
+
+    def add(self, node: Node):
+        self.children.append(node)
+
+class NodeFnDefinition(Node):
+    def __init__(self, public: bool, sym: Symbol, params: Node, body: Node) -> None:
+        super().__init__()
+        self.public =  public
+        self.sym = sym
+        self.params = params
+        self.body = body
+
+class NodeLiteral(Node):
+    def __init__(self, value, type: Type = None) -> None:
+        super().__init__(type)
+        self.value = value
+
+    def render(self, indent=0) -> str:
+        return str(self.value)
+
+class NodeLet(Node):
+    def __init__(self, sym: Symbol, expr: Node):
+        super().__init__()
+        self.sym = sym
+        self.expr = expr
+
+    def render(self, indent=0) -> str:
+        is_mut = self.sym.mutable
+        return f"{" " * indent}let {"mut " if is_mut else ""}{self.sym.name} = {self.expr.render()}"
+
 
 class Symbol:
-    def __init__(self, name: str, type: Type = None, exported: bool = False) -> None:
+    def __init__(self, name: str, type: Type = None, exported: bool = False, mutable: bool = False) -> None:
+        # TODO: Should store the source node, symbol kinds, sym id
         self.name = name
         self.type = type
         self.exported = exported
+        self.mutable = mutable
 
 
 class TypeKind(Enum):
@@ -55,7 +104,7 @@ class TypeKind(Enum):
 
 
 class Type:
-    def __init__(self, kind: TypeKind, data: Any) -> None:
+    def __init__(self, kind: TypeKind, data: Any = None) -> None:
         self.kind = kind
         self.data = data # TODO: arbitrary data for now
         # TODO: Add a type id later
@@ -139,7 +188,7 @@ class Type:
 class Scope:
     def __init__(self) -> None:
         self._local_syms: list[Symbol] = []
-        self.parent = Scope
+        self.parent: Scope = None
 
     def lookup(self, name: str, shallow=False) -> Symbol:
         # Must be unambiguous, can return an unexported symbol. Checked at calltime
@@ -147,9 +196,17 @@ class Scope:
             if symbol.name == name:
                 return symbol
         if shallow or self.parent == None:
-            # TODO: Report error in module instead of raising
-            raise ValueError(f"Unable to find {name} in scope")
+            # TODO: Report error in module
+            return None
         return self.lookup(name)
+
+    def put(self, name: str) -> Symbol:
+        assert type(name) == str
+        if self.lookup(name): raise ValueError(f"redefinition of {name}")
+        
+        result = Symbol(name)
+        self._local_syms.append(result)
+        return result
 
     def make_sibling() -> Scope:
         pass
@@ -161,21 +218,30 @@ class Scope:
         pass
 
 
+class CompCtx(lark.visitors.Interpreter):
+    def __init__(self, module: Module, graph: ModuleGraph) -> None:
+        self.module = module
+        self.graph = graph
+        self.current_scope = self.module.global_scope
+
+
 class Module:
-    def __init__(self, name: str, id: int, contents: str) -> None:
+    def __init__(self, name: str, id: int, contents: str, graph: ModuleGraph) -> None:
+        self.graph = graph
+        # TODO: Naming conflicts
+        self.imported_modules: list[Module] = []
+
         self.name = name
         self.global_scope = Scope()
         self.id = id
-        self.contents = contents
-        self.hash = hashlib.md5(contents).digest()
+        self.hash = hashlib.md5(contents.encode()).digest()
+        self.lark_tree = SerqParser().parse(contents, display=False)
         # mapping of (name, dict[params]) -> Type
         self.generic_cache: dict[(str, dict[Symbol, Type]), Type] = {}
 
-    def lookup_local_fn(name: str) -> list[Symbol]:
-        pass
+    def lookup_toplevel(self, name: str) -> Optional[Symbol]:
+        return self.global_scope.lookup(name, shallow=True)
 
-    def lookup_exported_fn(name: str) -> list[Symbol]:
-        pass
 
 class ModuleGraph:
     def __init__(self) -> None:
@@ -184,7 +250,12 @@ class ModuleGraph:
 
     def load(self, name: str, file_contents: str) -> Module:
         assert name not in self.modules
-        mod = Module(name, self._next_id, file_contents)
+        mod = Module(name, self._next_id, file_contents, self)
         self._next_id += 1
         self.modules[name] = mod
+        
+        # TODO: Make sure the module isn't already being processed
+        ast = CompCtx(mod, self).visit(mod.lark_tree)
+        print(ast[0][0].render()) # TODO: Only for debugging
+
         return mod
