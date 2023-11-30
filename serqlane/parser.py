@@ -2,12 +2,11 @@ from pathlib import Path
 
 from lark import Lark
 
-
 ROOT = Path(__file__).parent
 GRAMMAR = ROOT / "grammar.lark"
 
 
-class Parser:
+class SerqParser:
     def __init__(self, grammar_file: str | Path = GRAMMAR):
         with open(grammar_file) as fp:
             grammar = fp.read()
@@ -19,9 +18,11 @@ class Parser:
         if display:
             print(tree.pretty())
 
+        return tree
+
 
 if __name__ == "__main__":
-    parser = Parser()
+    parser = SerqParser()
 
     test_assignment = """
 // set x to 200
@@ -73,8 +74,14 @@ fn add(a: u4, b: u4) u4 {
 
     parser.parse(test_functions, display=False)
 
+    test_operator = """
+let x = 1 + 1;
+"""
+
+    parser.parse(test_operator)
+
     test_fizzbuzz = """
-fn fizz_buzz(input: u4) u4 | str {
+fn fizz_buzz(input: u4) str {
     return if (input % 3 == 0) and (input % 5 == 0) {
         "FizzBuzz"
     } else if input % 3 == 0 {
@@ -82,11 +89,12 @@ fn fizz_buzz(input: u4) u4 | str {
     } else if input % 5 == 0 {
         "Buzz"
     } else {
+        // ignore type
         input
     }
 }
 
-//print(fiz_buzz(7));
+print(fiz_buzz(input=7));
 """
 
-    parser.parse(test_fizzbuzz, display=True)
+    parser.parse(test_fizzbuzz, display=False)

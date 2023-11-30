@@ -2,9 +2,11 @@ start: (function | line)+
 
 //start: function
 
-?line: (expression | assignment | return) ";"?
+?line: (expression | assignment | return | define) ";"?
 
-assignment: "let" "mut"? id "=" expression
+define: "let" MUT? assignment
+MUT: "mut"
+assignment: id "=" expression
 
 return: "return" expression
 
@@ -12,8 +14,11 @@ block: "{" line+ "}"
 ?match_block: "{" ((/else/ | expression) "=>" expression ","?)+ "}"
 
 ?expression: (uncontained_expression | contained_expression)
-?uncontained_expression: if_block | if_expression | block | literal | id | operation | comparison
+?uncontained_expression: if_block | if_expression | block | literal | id | operation | comparison | function_call
 ?contained_expression: "(" expression ")"
+
+function_call: id "(" function_args ")"
+function_args: ((id "=")? expression ","?)+
 
 if_expression: if_condition (else_if+)? else?
 if_condition: "if" expression (condition_operation+)? block
@@ -30,15 +35,15 @@ if_block: "if" match_block
 id: /[a-zA-Z](\w|\d)*/
 ?id_literal: literal | id
 
-function: "fn" id function_args type block
-?function_args: "(" (typed_arg ","?)+ ")"
+function: "fn" id function_def_args type block
+?function_def_args: "(" (typed_arg ","?)+ ")"
 
 typed_arg: id ":" type
 
 type: id ("|" id)? 
 
-operation: id (operator id_literal)+
-?operator: add | sub | divide | multiply | modulus
+operation: id_literal (operator id_literal)+
+operator: add | sub | divide | multiply | modulus
 add: "+"
 sub: "-"
 divide: "/"
@@ -53,7 +58,7 @@ equal: "=="
 less_or_equal: less "="
 greater_or_equal: greater "="
 
-?literal: bool | number | string
+literal: bool | number | string
 !bool: "true" | "false"
 number: /\d+/
 string: "\"" /[^"]+/? "\""
