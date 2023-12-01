@@ -26,10 +26,10 @@ class NodeStmtList(Node):
         self.children.append(node)
 
     def render(self, indent=0) -> str:
-        result = ""
+        result = []
         for child in self.children:
-            result += child.render() + "\n"
-        return result
+            result.append(child.render())
+        return "\n".join(result)
 
 class NodeFnDefinition(Node):
     def __init__(self, public: bool, sym: Symbol, params: Node, body: Node) -> None:
@@ -68,6 +68,17 @@ class NodeLet(Node):
     def render(self, indent=0) -> str:
         is_mut = self.sym.mutable
         return f"{" " * indent}let {"mut " if is_mut else ""}{self.sym.name}{": " + self.type_sym.render() if self.type_sym != None else ""} = {self.expr.render()};"
+
+class NodeBinaryExpr(Node):
+    def __init__(self, lhs: Node, rhs: Node, type: Type) -> None:
+        super().__init__(type)
+        self.lhs = lhs
+        self.rhs = rhs
+
+class NodePlusExpr(NodeBinaryExpr):
+    def render(self, indent=0) -> str:
+        return f"{self.lhs.render()} + {self.rhs.render()}"
+
 
 class Symbol:
     def __init__(self, name: str, type: Type = None, exported: bool = False, mutable: bool = False) -> None:
@@ -156,7 +167,7 @@ class Type:
         self.sym = sym
         # TODO: Add a type id later
 
-    def can_convert_into(self, other: Type) -> bool:
+    def types_compatible(self, other: Type) -> bool:
         """
         other is always the target
         """
@@ -224,13 +235,13 @@ class Type:
             # literals
 
             case TypeKind.literal_bool:
-                return other.kind == TypeKind.bool
+                return other.kind in {TypeKind.literal_bool, TypeKind.bool}
             case TypeKind.literal_int:
-                return other.kind in int_types
+                return other.kind in int_types or other.kind == TypeKind.literal_int
             case TypeKind.literal_float:
-                return other.kind in float_types
+                return other.kind in float_types or other.kind == TypeKind.literal_float
             case TypeKind.literal_string:
-                return other.kind == TypeKind.string
+                return other.kind in {TypeKind.literal_string, TypeKind.string}
 
             case _:
                 raise ValueError(f"Unimplemented type comparison: {self.kind}")
@@ -323,6 +334,28 @@ class CompCtx(lark.visitors.Interpreter):
         val = tree.children[0].value
         return NodeStringLit(value=val, type=Type(TypeKind.literal_string, sym=None))
 
+
+    def binary_expression(self, tree: Tree):
+        lhs = self.visit(tree.children[0])
+        # TODO: Can the symbol be captured somehow?
+        op = tree.children[1].data.value
+        rhs = self.visit(tree.children[2])
+
+        if not lhs.type.types_compatible(rhs.type):
+            # TODO: Error reporting
+            raise ValueError(f"Incompatible values in binary expression: `{lhs.render()}`:{lhs.type.render()} {op} `{rhs.render()}`:{rhs.type.render()}")
+
+        # TODO: merge types if required
+        expr_type = lhs.type
+
+        # TODO: Other expressions
+        match op:
+            case "plus":
+                return NodePlusExpr(lhs, rhs, type=expr_type)
+            case _:
+                raise ValueError(f"Unimplemented binary op: {op}")
+
+
     def identifier(self, tree: Tree):
         val = tree.children[0].value
         sym = self.current_scope.lookup(val)
@@ -362,7 +395,7 @@ class CompCtx(lark.visitors.Interpreter):
 
         if type_sym != None:
             # check types for compatibility
-            if not val_node.type.can_convert_into(type_sym.type):
+            if not val_node.type.types_compatible(type_sym.type):
                 # TODO: Error reporting
                 raise ValueError(f"Variable type {type_sym.name} is not compatible with value of type {val_node.type.render()}")
             val_node.type = type_sym.type # coerce the node type
