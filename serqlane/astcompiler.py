@@ -49,7 +49,11 @@ class NodeLiteral[T](Node):
 
 class NodeIntLit(NodeLiteral[int]): ...
 class NodeFloatLit(NodeLiteral[float]): ...
-class NodeBoolLit(NodeLiteral[bool]): ...
+
+class NodeBoolLit(NodeLiteral[bool]):
+    def render(self) -> str:
+        return str(self.value).lower()
+
 class NodeStringLit(NodeLiteral[str]):
     def render(self) -> str:
         return f"\"{self.value}\""
