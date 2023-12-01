@@ -22,7 +22,7 @@
         self',
         ...
       }: let
-        python = pkgs.python311;
+        python = pkgs.python312;
         pyproject = builtins.fromTOML (builtins.readFile ./pyproject.toml);
         packageName = "serqlane";
       in {
@@ -48,9 +48,10 @@
             python
             just
             alejandra
-            python.pkgs.black
-            python.pkgs.isort
-            python.pkgs.vulture
+            # TODO: check if these work with 3.12 yet (change to python.pkgs.*)
+            python3.pkgs.black
+            python3.pkgs.isort
+            python3.pkgs.vulture
           ];
         };
       };
