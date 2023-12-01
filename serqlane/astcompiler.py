@@ -25,6 +25,12 @@ class NodeStmtList(Node):
     def add(self, node: Node):
         self.children.append(node)
 
+    def render(self, indent=0) -> str:
+        result = ""
+        for child in self.children:
+            result += child.render() + "\n"
+        return result
+
 class NodeFnDefinition(Node):
     def __init__(self, public: bool, sym: Symbol, params: Node, body: Node) -> None:
         super().__init__()
@@ -352,7 +358,6 @@ class CompCtx(lark.visitors.Interpreter):
 
         if type_sym != None:
             # check types for compatibility
-            print("Checking types")
             if not val_node.type.can_convert_into(type_sym.type):
                 # TODO: Error reporting
                 raise ValueError(f"Variable type {type_sym.name} is not compatible with value of type {val_node.type.render()}")
@@ -384,6 +389,14 @@ class CompCtx(lark.visitors.Interpreter):
             return result[0]
         else:
             assert False
+
+    def start(self, tree: Tree):
+        result = NodeStmtList()
+        for child in tree.children:
+            node = self.visit(child)
+            assert len(node) == 2 and node[1] == []
+            result.add(node[0])
+        return result
 
 
 class Module:
@@ -452,12 +465,15 @@ class ModuleGraph:
         self.modules[name] = mod
         
         # TODO: Make sure the module isn't already being processed
-        ast = CompCtx(mod, self).visit(mod.lark_tree)
-        print(ast)
-        print(ast[0][0].render())
-        print(ast[1][0].render())
-        print(ast[2][0].render())
-        print(ast[3][0].render())
+        print("RAW MODULE")
+        print(mod.lark_tree)
+        print("____")
+        ast: NodeStmtList = CompCtx(mod, self).visit(mod.lark_tree)
+        print(ast.render())
+        #print(ast[0][0].render())
+        #print(ast[1][0].render())
+        #print(ast[2][0].render())
+        #print(ast[3][0].render())
         #print(ast[0][0].render()) # TODO: Only for debugging
 
         return mod
