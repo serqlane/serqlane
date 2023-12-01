@@ -465,15 +465,7 @@ class ModuleGraph:
         self.modules[name] = mod
         
         # TODO: Make sure the module isn't already being processed
-        print("RAW MODULE")
-        print(mod.lark_tree)
-        print("____")
         ast: NodeStmtList = CompCtx(mod, self).visit(mod.lark_tree)
-        print(ast.render())
-        #print(ast[0][0].render())
-        #print(ast[1][0].render())
-        #print(ast[2][0].render())
-        #print(ast[3][0].render())
-        #print(ast[0][0].render()) # TODO: Only for debugging
+        print(ast.render()) # TODO: Only for debugging
 
         return mod
