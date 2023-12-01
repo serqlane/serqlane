@@ -410,6 +410,7 @@ class Module:
         self.id = id
         self.hash = hashlib.md5(contents.encode()).digest()
         self.lark_tree = SerqParser().parse(contents, display=False)
+        self.ast: Node = None
         # mapping of (name, dict[params]) -> Type
         self.generic_cache: dict[(str, dict[Symbol, Type]), Type] = {}
 
@@ -466,6 +467,5 @@ class ModuleGraph:
         
         # TODO: Make sure the module isn't already being processed
         ast: NodeStmtList = CompCtx(mod, self).visit(mod.lark_tree)
-        print(ast.render()) # TODO: Only for debugging
-
+        mod.ast = ast
         return mod
