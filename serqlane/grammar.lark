@@ -1,8 +1,10 @@
 start: statement*
 
-statement: (expression | assignment | return | let_stmt | function_definition) terminator?
+statement: (expression | assignment | return | let_stmt | function_definition) terminator
 
-let_stmt: "let" MUT? identifier (":" expression)? "=" expression
+user_type: ":" expression
+
+let_stmt: "let" MUT? identifier user_type? "=" expression
 MUT: "mut"
 assignment: identifier "=" expression
 
@@ -22,8 +24,16 @@ else_if: "else" if_condition
 else: "else" block
 
 
-binary_expression: expression binary_operator expression
-?binary_operator: or | and | plus | minus | modulus | star | slash | dot
+binary_expression: expression plus expression
+| expression minus expression
+| expression modulus expression
+| expression star expression
+| expression slash expression
+| expression dot expression
+| expression and expression
+| expression or expression
+
+
 dot: "."
 star: "*"
 slash: "/"
@@ -41,14 +51,13 @@ ampersand: "&"
 
 identifier: /[a-zA-Z](\w|\d)*/
 
-function_definition: pub_modifier? "fn" identifier function_def_args type? block
+function_definition: pub_modifier? "fn" identifier function_def_args return_type? block
 function_def_args: "(" (typed_arg ","?)+ ")"
 
 pub_modifier: "pub"
 
-typed_arg: identifier ":" type
-
-type: ampersand? MUT? identifier 
+typed_arg: identifier user_type
+return_type: expression
 
 ?literal: bool | number | string
 !bool: "true" | "false"
@@ -57,7 +66,7 @@ integer: /\d+/
 decimal: integer? "." integer
 string: "\"" /[^"]+/? "\""
 
-terminator: ";"
+?terminator: ";"
 
 COMMENT: /\s*/ "//" /[^\n]/*
 %ignore COMMENT
