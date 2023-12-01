@@ -1,6 +1,8 @@
+from collections.abc import Generator
 from pathlib import Path
+from typing import Any
 
-from lark import Lark
+from lark import Lark, ParseTree, Token
 
 ROOT = Path(__file__).parent
 GRAMMAR = ROOT / "grammar.lark"
@@ -13,22 +15,27 @@ class SerqParser:
 
         self.lark = Lark(grammar)
 
-    def parse(self, entry: str, display: bool = True):
+    def parse(self, entry: str, display: bool = False):
         tree = self.lark.parse(entry)
         if display:
             print(tree.pretty())
 
         return tree
 
+    def iter_subtrees(self, entry: str) -> Generator[ParseTree, Any, None]:
+        tree = self.parse(entry)
+        return tree.iter_subtrees_topdown()
+
 
 if __name__ == "__main__":
     parser = SerqParser()
 
     test_assignment = """
-// set x to 200
 let x = 200
-let mut y = 300
 """
+
+    print(list(parser.iter_subtrees(test_assignment)))
+    exit()
 
     parser.parse(test_assignment, display=False)
 

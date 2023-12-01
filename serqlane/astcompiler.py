@@ -1,17 +1,17 @@
 from __future__ import annotations
+
 from typing import Any, Optional
 from enum import Enum, auto
 
 import hashlib
 
 import lark.visitors
-from lark import Tree, Token
 
 from serqlane.parser import SerqParser
 
 
 class Node:
-    def __init__(self, type: Type = None) -> None:
+    def __init__(self, type: Type | None = None) -> None:
         self.type = type
 
     def render(self, indent=0) -> str:
@@ -34,7 +34,7 @@ class NodeFnDefinition(Node):
         self.body = body
 
 class NodeLiteral(Node):
-    def __init__(self, value, type: Type = None) -> None:
+    def __init__(self, value, type: Type | None = None) -> None:
         super().__init__(type)
         self.value = value
 
@@ -53,7 +53,7 @@ class NodeLet(Node):
 
 
 class Symbol:
-    def __init__(self, name: str, type: Type = None, exported: bool = False, mutable: bool = False) -> None:
+    def __init__(self, name: str, type: Type | None = None, exported: bool = False, mutable: bool = False) -> None:
         # TODO: Should store the source node, symbol kinds, sym id
         self.name = name
         self.type = type
@@ -109,7 +109,7 @@ class Type:
         self.data = data # TODO: arbitrary data for now
         # TODO: Add a type id later
 
-    def compare(self, other: Type) -> bool:
+    def compare(self, other: Type) -> bool:  # type: ignore (type checker doesn't account for _ case of match)
         """
         other is always the target
         """
@@ -188,9 +188,9 @@ class Type:
 class Scope:
     def __init__(self) -> None:
         self._local_syms: list[Symbol] = []
-        self.parent: Scope = None
+        self.parent: Scope | None = None
 
-    def lookup(self, name: str, shallow=False) -> Symbol:
+    def lookup(self, name: str, shallow=False) -> Symbol | None:
         # Must be unambiguous, can return an unexported symbol. Checked at calltime
         for symbol in self._local_syms:
             if symbol.name == name:
@@ -208,14 +208,14 @@ class Scope:
         self._local_syms.append(result)
         return result
 
-    def make_sibling() -> Scope:
-        pass
+    def make_sibling(self) -> Scope:
+        ...
 
-    def make_child() -> Scope:
-        pass
+    def make_child(self) -> Scope:
+        ...
 
-    def merge(other: Scope):
-        pass
+    def merge(self, other: Scope):
+        ...
 
 
 class CompCtx(lark.visitors.Interpreter):
@@ -237,7 +237,7 @@ class Module:
         self.hash = hashlib.md5(contents.encode()).digest()
         self.lark_tree = SerqParser().parse(contents, display=False)
         # mapping of (name, dict[params]) -> Type
-        self.generic_cache: dict[(str, dict[Symbol, Type]), Type] = {}
+        self.generic_cache: dict[tuple[str, dict[Symbol, Type]], Type] = {}
 
     def lookup_toplevel(self, name: str) -> Optional[Symbol]:
         return self.global_scope.lookup(name, shallow=True)
