@@ -69,15 +69,50 @@ class NodeLet(Node):
         is_mut = self.sym.mutable
         return f"{" " * indent}let {"mut " if is_mut else ""}{self.sym.name}{": " + self.type_sym.render() if self.type_sym != None else ""} = {self.expr.render()};"
 
+
+
 class NodeBinaryExpr(Node):
     def __init__(self, lhs: Node, rhs: Node, type: Type) -> None:
         super().__init__(type)
         self.lhs = lhs
         self.rhs = rhs
 
+class NodeDotExpr(NodeBinaryExpr):
+    def render(self, indent=0) -> str:
+        return f"({self.lhs.render()}.{self.rhs.render()})"
+
+# TODO: These could be converted into (infix) functions to be stored as op(lhs, rhs) in reimpl
+# arith
 class NodePlusExpr(NodeBinaryExpr):
     def render(self, indent=0) -> str:
-        return f"{self.lhs.render()} + {self.rhs.render()}"
+        return f"({self.lhs.render()} + {self.rhs.render()})"
+
+class NodeMinusExpression(NodeBinaryExpr):
+    def render(self, indent=0) -> str:
+        return f"({self.lhs.render()} - {self.rhs.render()})"
+
+class NodeMulExpression(NodeBinaryExpr):
+    def render(self, indent=0) -> str:
+        return f"({self.lhs.render()} * {self.rhs.render()})"
+
+class NodeDivExpression(NodeBinaryExpr):
+    def render(self, indent=0) -> str:
+        return f"({self.lhs.render()} / {self.rhs.render()})"
+
+# int only
+class NodeModExpression(NodeBinaryExpr):
+    def render(self, indent=0) -> str:
+        return f"({self.lhs.render()} % {self.rhs.render()})"
+
+# logic
+class NodeAndExpression(NodeBinaryExpr):
+    def render(self, indent=0) -> str:
+        return f"({self.lhs.render()} and {self.rhs.render()})"
+
+class NodeOrExpression(NodeBinaryExpr):
+    def render(self, indent=0) -> str:
+        return f"({self.lhs.render()} or {self.rhs.render()})"
+
 
 
 class Symbol:
@@ -156,6 +191,18 @@ literal_types = frozenset([
     TypeKind.literal_bool,
     TypeKind.literal_string,
 ])
+
+# TODO: Other solution based on operator signatures
+arith_types = frozenset([
+    TypeKind.literal_int,
+    TypeKind.literal_float,
+] + list(int_types) + list(float_types))
+
+logical_types = frozenset([
+    TypeKind.literal_int,
+    TypeKind.literal_bool,
+] + list(int_types))
+
 
 # TODO: Add the other appropriate types
 builtin_userspace_types = frozenset(list(int_types) + list(float_types) + [TypeKind.bool, TypeKind.char, TypeKind.string])
@@ -341,17 +388,37 @@ class CompCtx(lark.visitors.Interpreter):
         op = tree.children[1].data.value
         rhs = self.visit(tree.children[2])
 
+        # TODO: Dot expr, decide if int/int=float or int/int=int
         if not lhs.type.types_compatible(rhs.type):
             # TODO: Error reporting
             raise ValueError(f"Incompatible values in binary expression: `{lhs.render()}`:{lhs.type.render()} {op} `{rhs.render()}`:{rhs.type.render()}")
-
-        # TODO: merge types if required
         expr_type = lhs.type
-
-        # TODO: Other expressions
+        
         match op:
             case "plus":
+                assert expr_type.kind in arith_types
                 return NodePlusExpr(lhs, rhs, type=expr_type)
+            case "minus":
+                assert expr_type.kind in arith_types
+                return NodeMinusExpression(lhs, rhs, type=expr_type)
+            case "star":
+                assert expr_type.kind in arith_types
+                return NodeMulExpression(lhs, rhs, type=expr_type)
+            case "slash":
+                assert expr_type.kind in arith_types
+                return NodeDivExpression(lhs, rhs, type=expr_type)
+            case "modulus":
+                assert expr_type.kind in int_types or expr_type.kind == TypeKind.literal_int
+                return NodeModExpression(lhs, rhs, type=expr_type)
+            case "and":
+                assert expr_type.kind in logical_types
+                return NodeAndExpression(lhs, rhs, type=expr_type)
+            case "or":
+                assert expr_type.kind in logical_types
+                return NodeOrExpression(lhs, rhs, type=expr_type)
+            case "dot":
+                # TODO: Has to use the type of rhs for node type, can only be done once types and field lookup exist
+                raise ValueError("Dot expressions are not ready")
             case _:
                 raise ValueError(f"Unimplemented binary op: {op}")
 

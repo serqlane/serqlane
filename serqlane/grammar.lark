@@ -24,8 +24,16 @@ else_if: "else" if_condition
 else: "else" block
 
 
-binary_expression: expression binary_operator expression
-?binary_operator: or | and | plus | minus | modulus | star | slash | dot
+binary_expression: expression plus expression
+| expression minus expression
+| expression modulus expression
+| expression star expression
+| expression slash expression
+| expression dot expression
+| expression and expression
+| expression or expression
+
+
 dot: "."
 star: "*"
 slash: "/"
