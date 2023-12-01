@@ -70,6 +70,14 @@ class NodeLet(Node):
         return f"{" " * indent}let {"mut " if is_mut else ""}{self.sym.name}{": " + self.type_sym.render() if self.type_sym != None else ""} = {self.expr.render()};"
 
 
+class NodeGrouped(Node):
+    def __init__(self, inner: Node, type: Type) -> None:
+        super().__init__(type)
+        self.inner = inner
+    
+    def render(self, indent=0) -> str:
+        return f"({self.inner.render()})"
+
 
 class NodeBinaryExpr(Node):
     def __init__(self, lhs: Node, rhs: Node, type: Type) -> None:
@@ -113,6 +121,30 @@ class NodeOrExpression(NodeBinaryExpr):
     def render(self, indent=0) -> str:
         return f"({self.lhs.render()} or {self.rhs.render()})"
 
+# comparison
+class NodeEqualsExpression(NodeBinaryExpr):
+    def render(self, indent=0) -> str:
+        return f"({self.lhs.render()} == {self.rhs.render()})"
+
+class NodeNotEqualsExpression(NodeBinaryExpr):
+    def render(self, indent=0) -> str:
+        return f"({self.lhs.render()} != {self.rhs.render()})"
+    
+class NodeLessExpression(NodeBinaryExpr):
+    def render(self, indent=0) -> str:
+        return f"({self.lhs.render()} < {self.rhs.render()})"
+
+class NodeLessEqualsExpression(NodeBinaryExpr):
+    def render(self, indent=0) -> str:
+        return f"({self.lhs.render()} <= {self.rhs.render()})"
+    
+class NodeGreaterExpression(NodeBinaryExpr):
+    def render(self, indent=0) -> str:
+        return f"({self.lhs.render()} > {self.rhs.render()})"
+
+class NodeGreaterEqualsExpression(NodeBinaryExpr):
+    def render(self, indent=0) -> str:
+        return f"({self.lhs.render()} >= {self.rhs.render()})"
 
 
 class Symbol:
@@ -234,14 +266,20 @@ class Type:
             case TypeKind.unit:
                 raise ValueError("units aren't ready yet")
             
-
             # magic types
 
             # TODO: Can you match sets?
-            case TypeKind.bool | TypeKind.char| \
-                TypeKind.int8 | TypeKind.uint8 | TypeKind.int16 | TypeKind.uint16 | TypeKind.int32 | TypeKind.uint32 | TypeKind.int64 | TypeKind.uint64 | \
-                TypeKind.float32 | TypeKind.float64 | TypeKind.pointer | TypeKind.string:
+            case TypeKind.char | TypeKind.pointer:
                 return self.kind == other.kind
+            case TypeKind.bool:
+                return self.kind == other.kind or other.kind == TypeKind.literal_bool    
+            case TypeKind.int8 | TypeKind.uint8 | TypeKind.int16 | TypeKind.uint16 | TypeKind.int32 | TypeKind.uint32 | TypeKind.int64 | TypeKind.uint64:
+                return self.kind == other.kind or other.kind == TypeKind.literal_int
+            case TypeKind.float32 | TypeKind.float64:
+                return self.kind == other.kind or other.kind == TypeKind.literal_float
+            case TypeKind.string:
+                return self.kind == other.kind or other.kind == TypeKind.literal_string
+
             case TypeKind.reference:
                 if self.kind != other.kind:
                     return False
@@ -364,6 +402,10 @@ class CompCtx(lark.visitors.Interpreter):
         self.graph = graph
         self.current_scope = self.module.global_scope
 
+    def grouped_expression(self, tree: Tree):
+        inner = self.visit(tree.children[0])
+        return NodeGrouped(inner, inner.type)
+
     def integer(self, tree: Tree):
         val = tree.children[0].value
         # untyped at this stage
@@ -393,7 +435,7 @@ class CompCtx(lark.visitors.Interpreter):
             # TODO: Error reporting
             raise ValueError(f"Incompatible values in binary expression: `{lhs.render()}`:{lhs.type.render()} {op} `{rhs.render()}`:{rhs.type.render()}")
         expr_type = lhs.type
-        
+
         match op:
             case "plus":
                 assert expr_type.kind in arith_types
@@ -407,15 +449,36 @@ class CompCtx(lark.visitors.Interpreter):
             case "slash":
                 assert expr_type.kind in arith_types
                 return NodeDivExpression(lhs, rhs, type=expr_type)
+            
             case "modulus":
                 assert expr_type.kind in int_types or expr_type.kind == TypeKind.literal_int
                 return NodeModExpression(lhs, rhs, type=expr_type)
+            
             case "and":
                 assert expr_type.kind in logical_types
                 return NodeAndExpression(lhs, rhs, type=expr_type)
             case "or":
                 assert expr_type.kind in logical_types
                 return NodeOrExpression(lhs, rhs, type=expr_type)
+            
+            case "equals":
+                return NodeEqualsExpression(lhs, rhs, type=self.current_scope.lookup_type("bool"))
+            case "not_equals":
+                return NodeNotEqualsExpression(lhs, rhs, type=self.current_scope.lookup_type("bool"))
+            case "less":
+                # TODO: Ordinal types.
+                assert expr_type.kind in arith_types
+                return NodeLessExpression(lhs, rhs, type=self.current_scope.lookup_type("bool"))
+            case "lesseq":
+                assert expr_type.kind in arith_types
+                return NodeLessEqualsExpression(lhs, rhs, type=self.current_scope.lookup_type("bool"))
+            case "greater":
+                assert expr_type.kind in arith_types
+                return NodeGreaterExpression(lhs, rhs, type=self.current_scope.lookup_type("bool"))
+            case "greatereq":
+                assert expr_type.kind in arith_types
+                return NodeGreaterEqualsExpression(lhs, rhs, type=self.current_scope.lookup_type("bool"))
+
             case "dot":
                 # TODO: Has to use the type of rhs for node type, can only be done once types and field lookup exist
                 raise ValueError("Dot expressions are not ready")
