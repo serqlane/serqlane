@@ -1,6 +1,6 @@
 start: statement*
 
-statement: ((expression | assignment | return | let_stmt) _terminator) | block_stmt
+statement: ((expression | assignment | return | let_stmt) _terminator) | (block_stmt | while_stmt)
 
 user_type: ":" expression
 
@@ -13,7 +13,7 @@ return: "return" expression
 block_stmt: _block
 _block: "{" statement* "}" // TODO: There is no such thing as a block expression right now
 
-while_stmt: "while" _block
+while_stmt: "while" "(" expression ")" block_stmt
 
 expression: literal | identifier | binary_expression | unary_expression | grouped_expression
 grouped_expression: "(" expression ")"
