@@ -617,8 +617,9 @@ class CompCtx(lark.visitors.Interpreter):
             if not val_node.type.types_compatible(resolved_type):
                 # TODO: Error reporting
                 raise ValueError(f"Variable type {type_sym.name} is not compatible with value of type {val_node.type.render()}")
-            # TODO: Might be dangerous
-            val_node.type = resolved_type # coerce the value type for now
+            else:
+                assert val_node.type.kind not in literal_types
+            # no need to resem the node, it should already be with the current type resolution
         else:
             # infer type from value
             # TODO: Instantiate types, for now only literals            
@@ -627,7 +628,7 @@ class CompCtx(lark.visitors.Interpreter):
             else:
                 assert val_node.type.kind in literal_types
                 resolved_type = val_node.type.instantiate_literal(self.graph)
-                val_node.type = resolved_type
+                val_node = self.visit(tree.children[f], resolved_type)
 
         f += 1
         assert len(tree.children) == f
