@@ -447,7 +447,7 @@ class CompCtx(lark.visitors.Interpreter):
 
     # new functions
     def grouped_expression(self, tree: Tree, expected_type: Type):
-        inner = self.visit(tree.children[0])
+        inner = self.visit(tree.children[0], expected_type)
         return NodeGrouped(inner, inner.type)
 
     def integer(self, tree: Tree, expected_type: Type):
