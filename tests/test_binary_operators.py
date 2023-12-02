@@ -40,6 +40,7 @@ def test_literal_arith(checking_executor: Callable[[str, str, Any], None]):
 
     checking_executor("let x = 1 + 1 + 1;", "x", 3)
     checking_executor("let x = 10 / (3 + 2);", "x", 2)
+    checking_executor("let x = (10 / (3 + 2));", "x", 2)
 
 
 def test_variable_arith(checking_executor: Callable[[str, str, Any], None]):

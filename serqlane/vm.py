@@ -27,11 +27,18 @@ class SerqVM:
                 operation = operator.mul
             case NodeDivExpression():
                 assert expression.type is not None
+
                 # TODO: should this be handled like this?
                 if expression.type.kind in int_types:
                     operation = operator.floordiv
                 else:
+                    if expression.type.kind is TypeKind.literal_int:
+                        raise RuntimeError(f"Got literal int in {expression}")
+
                     operation = operator.truediv
+                
+                print(f"{operation=} {expression=} {expression.type.kind=}")
+
             case NodeModExpression():
                 operation = operator.mod
             case NodeAndExpression():
@@ -68,6 +75,9 @@ class SerqVM:
             case Symbol():
                 return self.stack[-1][expression]
 
+            case NodeGrouped():
+                return self.eval(expression.inner)
+
             case _:
                 raise NotImplementedError(f"{expression=}")
 
@@ -96,8 +106,7 @@ class SerqVM:
 
 if __name__ == "__main__":
     code = """
-// ; is olaf cope
-let x = 5 / 2;
+let x: int = "abc";
 """
 
     graph = ModuleGraph()
