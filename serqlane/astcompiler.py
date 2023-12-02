@@ -723,7 +723,7 @@ class CompCtx(lark.visitors.Interpreter):
             # TODO: Return an empty node with empty type
             # TODO: Have expected type be `type` metatype
             type_sym = self.visit(type_tree, None)
-            assert isinstance(type_sym, Symbol)
+            assert isinstance(type_sym, NodeSymbol)
             f += 1
         
         val_node_expected_type = type_sym.type if type_sym != None else self.get_infer_type()
@@ -735,7 +735,7 @@ class CompCtx(lark.visitors.Interpreter):
             # check types for compatibility
             if not val_node.type.types_compatible(resolved_type):
                 # TODO: Error reporting
-                raise ValueError(f"Variable type {type_sym.name} is not compatible with value of type {val_node.type.render()}")
+                raise ValueError(f"Variable type {type_sym.symbol.name} is not compatible with value of type {val_node.type.render()}")
             else:
                 assert val_node.type.kind not in literal_types
             # no need to resem the node, it should already be with the current type resolution
