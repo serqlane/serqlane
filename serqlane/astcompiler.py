@@ -331,11 +331,11 @@ class Type:
             case _:
                 raise ValueError(f"Unimplemented type comparison: {self.kind}")
 
-    def instantiate(self, graph: ModuleGraph) -> Type:
+    def instantiate_literal(self, graph: ModuleGraph) -> Type:
         """
-        Turns a literal or generic type into a concrete one
+        Turns a literal into a concrete type
         """
-        assert self.kind in literal_types # for now only literal types are relevant
+        assert self.kind in literal_types
         match self.kind:
             case TypeKind.literal_int:
                 return graph.builtin_scope.lookup_type("int")
@@ -345,6 +345,8 @@ class Type:
                 return graph.builtin_scope.lookup_type("bool")
             case TypeKind.literal_string:
                 return graph.builtin_scope.lookup_type("string")
+            case _:
+                raise ValueError(f"Forgot a literal type: {self.kind}")
 
     def render(self) -> str:
         # TODO: match on sets?
@@ -549,7 +551,7 @@ class CompCtx(lark.visitors.Interpreter):
             # infer type from value
             # TODO: Instantiate types, for now only literals
             assert val_node.type.kind in literal_types
-            type_sym = val_node.type.instantiate(self.graph)
+            type_sym = val_node.type.instantiate_literal(self.graph)
 
         f += 1
         assert len(tree.children) == f
