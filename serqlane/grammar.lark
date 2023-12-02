@@ -1,6 +1,13 @@
 start: statement*
 
-statement: ((expression | assignment | return | let_stmt) _terminator) | (block_stmt | while_stmt | if_stmt)
+statement: ((return_stmt | break_stmt | continue_stmt | expression | assignment | let_stmt) _terminator) | (fn_definition | block_stmt | while_stmt | if_stmt)
+
+fn_definition: "fn" identifier fn_definition_args user_type block_stmt
+fn_definition_args: "(" [fn_definition_arg ("," fn_definition_arg)*] ")"
+fn_definition_arg: identifier user_type
+
+fn_call_expr: expression fn_call_args
+fn_call_args: "(" [expression ("," expression)*] ")"
 
 user_type: ":" expression
 
@@ -8,7 +15,9 @@ let_stmt: "let" MUT? identifier user_type? "=" expression
 MUT: "mut"
 assignment: identifier "=" expression
 
-return: "return" expression
+return_stmt: "return" expression
+break_stmt: "break"
+continue_stmt: "continue"
 
 block_stmt: _block
 _block: "{" statement* "}" // TODO: There is no such thing as a block expression right now
@@ -16,7 +25,7 @@ _block: "{" statement* "}" // TODO: There is no such thing as a block expression
 while_stmt: "while" expression block_stmt
 if_stmt: "if" expression block_stmt ["else" block_stmt]
 
-expression: literal | identifier | binary_expression | unary_expression | grouped_expression
+expression: fn_call_expr | literal | identifier | binary_expression | unary_expression | grouped_expression
 grouped_expression: "(" expression ")"
 
 
@@ -68,13 +77,7 @@ unary_expression: unary_operator? expression
 not: "not"
 ampersand: "&"
 
-
 identifier: /[a-zA-Z](\w|\d)*/
-
-pub_modifier: "pub"
-
-typed_arg: identifier user_type
-return_type: expression
 
 ?literal: bool | number | string
 !bool: "true" | "false"

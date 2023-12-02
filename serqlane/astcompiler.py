@@ -17,7 +17,7 @@ class Node:
         self.type = type
 
     def render(self) -> str:
-        raise NotImplementedError()
+        raise NotImplementedError(f"{type(self)}")
 
 class NodeSymbol(Node):
     def __init__(self, symbol: Symbol, type: Type | None = None) -> None:
@@ -41,14 +41,6 @@ class NodeStmtList(Node):
         for child in self.children:
             result.append(child.render())
         return "\n".join(result)
-
-class NodeFnDefinition(Node):
-    def __init__(self, public: bool, sym: Symbol, params: Node, body: Node) -> None:
-        super().__init__()
-        self.public =  public
-        self.sym = sym
-        self.params = params
-        self.body = body
 
 class NodeLiteral[T](Node):
     def __init__(self, value: T, type: Type) -> None:
@@ -200,22 +192,72 @@ class NodeIfStmt(Node):
         if_body = self.if_body.render()
         else_body = self.else_body.render()
         return f"if ({cond}) {if_body} else {else_body}"
-        
+
+
+class NodeReturn(Node):
+    def __init__(self, expr: Node) -> None:
+        super().__init__(None)
+        self.expr = expr
+
+    def render(self) -> str:
+        return f"return {self.expr.render()};"
+
+class NodeFnParameters(Node):
+    def __init__(self, args: list[tuple[NodeSymbol, Node]]):
+        """
+        args is a list of (param_sym, type_node)
+        type is stored as a node to help with generic instantiation later
+        """
+        self.args = args
+
+    def render(self) -> str:
+        return ", ".join([x[0].render() + ": " + x[1].type.render() for x in self.args])
+
+class NodeFnDefinition(Node):
+    def __init__(self, sym: Symbol, params: NodeFnParameters, body: NodeBlockStmt) -> None:
+        super().__init__(None)
+        assert sym.type.kind == TypeKind.function
+        self.sym = sym # holds all of the actual type info
+        self.sym.definition_node = self # store a reference to self so we can resolve named args
+        self.params = params # Need this for named args like foo(a=10)
+        self.body = body
+
+    def render(self) -> str:
+        return f"fn {self.sym.render()}({self.params.render()}) {self.body.render()}"
+
+class NodeFnCall(Node):
+    def __init__(self, callee: Node, args: list[Node], type: Type | None = None) -> None:
+        super().__init__(type)
+        self.callee = callee
+        self.args = args
+
+    def render(self) -> str:
+        args = ", ".join([x.render() for x in self.args])
+        return f"{self.callee.render()}({args})"
+
+
+# TODO: Use these, will make later analysis easier
+class SymbolKind(Enum):
+    variable = auto()
+    function = auto()
+    parameter = auto()
+    type = auto() # TODO: Types
+    field = auto()
+
 
 class Symbol:
-    def __init__(self, name: str, type: Type | None = None, exported: bool = False, mutable: bool = False) -> None:
-        # TODO: Should store the source node, symbol kinds, sym id
+    def __init__(self, id: str, name: str, type: Type | None = None, mutable: bool = False) -> None:
+        # TODO: Should store the source node, symbol kinds
+        self.id = id
         self.name = name
         self.type = type
-        self.exported = exported
+        self.exported = False
         self.mutable = mutable
-
-    def __repr__(self) -> str:
-        return f"<Symbol name={self.name}>"
+        self.definition_node: Node = None
 
     def render(self) -> str:
         # TODO: Use type info to render generics and others
-        return self.name
+        return f"{self.name}_{self.id}"
 
 
 class TypeKind(Enum):
@@ -251,6 +293,8 @@ class TypeKind(Enum):
     string = auto()
     array = auto() # array[T, int]
     static = auto() # TODO: static[T]
+
+    function = auto() # fn(int, float): bool
 
     alias = auto() # Alias[T]
     distinct = auto() # distinct[T]
@@ -322,6 +366,9 @@ class Type:
             case TypeKind.unit:
                 raise ValueError("units aren't ready yet")
             
+            case TypeKind.function:
+                raise NotImplementedError() # TODO
+
             # magic types
 
             # TODO: Can you match sets?
@@ -408,6 +455,9 @@ class Type:
         # TODO: match on sets?
         if self.kind in builtin_userspace_types or self.kind in literal_types:
             return self.kind.name
+        if self.kind == TypeKind.function:
+            args = ", ".join([x.render() for x in self.data[0]])
+            return f"fn({args}): {self.data[1].render()}"
         else:
             raise NotImplementedError()
 
@@ -444,7 +494,7 @@ class Scope:
         assert type(name) == str
         if checked and self.lookup(name): raise ValueError(f"redefinition of {name}")
         
-        result = Symbol(name)
+        result = Symbol(self.module_graph.sym_id_gen.next(), name=name)
         self._local_syms.append(result)
         return result
 
@@ -458,11 +508,6 @@ class Scope:
         sym = self.put(name)
         sym.mutable = mutable
         return sym
-
-    def make_sibling(self) -> Scope:
-        res = Scope(self.module_graph)
-        res.parent = self.parent
-        return res
 
     def make_child(self) -> Scope:
         res = Scope(self.module_graph)
@@ -478,6 +523,7 @@ class CompCtx(lark.visitors.Interpreter):
         self.module = module
         self.graph = graph
         self.current_scope = self.module.global_scope
+        self.fn_ret_type_stack: list[Type] = []
 
     def get_infer_type(self) -> Type:
         return Type(kind=TypeKind.infer, sym=None)
@@ -759,6 +805,88 @@ class CompCtx(lark.visitors.Interpreter):
             expr=val_node
         )
 
+    def return_stmt(self, tree: Tree, expected_type: Type):
+        assert expected_type == None
+        assert len(self.fn_ret_type_stack) > 0, "Return outside of a function"
+        # TODO: Make sure this passes type checks
+        return NodeReturn(expr=self.visit(tree.children[0], self.fn_ret_type_stack[-1]))
+
+    def fn_definition_args(self, tree: Tree, expected_type: Type):
+        assert expected_type == None
+
+        params = []
+        for child in tree.children:
+            assert child.data == "fn_definition_arg"
+            # TODO: Mutable args
+            ident = child.children[0].children[0].value
+            sym = self.current_scope.put_let(ident) # effectively a let
+            type_node = self.visit(child.children[1], None)
+            sym.type = type_node.symbol.type # TODO: This is not clean at all
+            params.append((sym, type_node))
+
+        return NodeFnParameters(params)
+
+    def fn_definition(self, tree: Tree, expected_type: Type):
+        assert expected_type == None
+
+        ident_node = tree.children[0]
+        assert ident_node.data == "identifier"
+        ident = ident_node.children[0].value
+
+
+        # must open a scope here to isolate the params
+        fn_scope = self.current_scope.make_child()
+        
+        args_node = self.visit(tree.children[1], None)
+        assert isinstance(args_node, NodeFnParameters)
+        ret_type_node = self.visit(tree.children[2], None)
+        assert isinstance(ret_type_node, NodeSymbol)
+
+        # TODO: Make this work for generics later
+        self.fn_ret_type_stack.append(ret_type_node.type)
+
+        # TODO: Use a type cache to load function with the same type from it for easier matching
+        fn_type = Type(
+            kind=TypeKind.function,
+            sym=None,
+            data=([x[1].type for x in args_node.args], ret_type_node)
+        )
+
+        body_node = self.visit(tree.children[3], None) # TODO: once block expressions work, this should expect the return type
+        assert isinstance(body_node, NodeBlockStmt)
+
+        self.fn_ret_type_stack.pop()
+
+        # restore scope
+        self.current_scope = fn_scope.parent
+
+        sym = self.current_scope.put(ident)
+        sym.type = fn_type
+
+        res = NodeFnDefinition(sym, args_node, body_node)
+        sym.definition_node = res
+        return res
+
+    def fn_call_expr(self, tree: Tree, expected_type: Type):
+        # TODO: Once overloads/methods are in, this must scan visible symbols and retrieve a list. Handled in identifier though
+        callee = self.visit(tree.children[0], None)
+        arg_types = callee.symbol.type.data[0]
+        ret_type_node = callee.symbol.type.data[1]
+        assert isinstance(ret_type_node, NodeSymbol)
+
+        params = []
+        if tree.children[1] != None:
+            assert len(tree.children[1].children) == len(arg_types)
+            for i in range(0, len(arg_types)):
+                params.append(self.visit(tree.children[1].children[i], arg_types[i]))
+        else:
+            assert len(arg_types) == 0
+
+        return NodeFnCall(
+            callee=callee,
+            args=params,
+            type=ret_type_node.symbol.type
+        )
 
     def expression(self, tree: Tree, expected_type: Type):
         # TODO: Handle longer expressions?
@@ -800,10 +928,20 @@ class Module:
         return self.global_scope.lookup(name, shallow=True)
 
 
+class IdGen:
+    def __init__(self) -> None:
+        self._idx = 0 # TODO: choose a smarter way later
+
+    def next(self) -> str:
+        res = str(self._idx)
+        self._idx += 1
+        return res
+
 class ModuleGraph:
     def __init__(self) -> None:
         self.modules: dict[str, Module] = {} # TODO: Detect duplicates based on hash, reduce workload
         self._next_id = 0 # TODO: Generate in a smarter way
+        self.sym_id_gen = IdGen()
 
         # TODO: Use a type cache instead of scope hack
         self.builtin_scope = Scope(self)
