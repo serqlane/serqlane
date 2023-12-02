@@ -4,6 +4,13 @@ from typing import Any
 from serqlane.astcompiler import *
 
 
+class SerqVMError(Exception): ...
+
+class ContinueError(SerqVMError): ...
+
+class BreakError(SerqVMError): ...
+
+
 class SerqVM:
     def __init__(self) -> None:
         self.stack: list[dict[Symbol, Any]] = []
@@ -123,8 +130,32 @@ class SerqVM:
                     self.exit_scope()
 
                 case NodeWhileStmt():
+                    stack = None
                     while self.eval(child.cond_expr):
-                        self.execute_node(child.body)
+                        # copy stack for exections skipping exit_scope
+                        stack = self.stack.copy()
+                        try:
+                            self.execute_node(child.body)
+                        except ContinueError:
+                            self.stack = stack
+                        except BreakError:
+                            break
+ 
+                    if stack is not None:
+                        self.stack = stack
+
+                case NodeContinue():
+                    raise ContinueError()
+
+                case NodeBreak():
+                    raise BreakError()
+
+                case NodeIfStmt():
+                    evaluated_cond = self.eval(child.cond_expr)
+                    if evaluated_cond:
+                        self.execute_node(child.if_body)
+                    else:
+                        self.execute_node(child.else_body)
 
                 case _:
                     raise NotImplementedError(f"{child=}")
@@ -142,9 +173,9 @@ class SerqVM:
 
 if __name__ == "__main__":
     code = """
-let mut i = 10;
-while i != 0 {
-    i = i - 1;
+let mut x = 0;
+while true {
+  x = x + 1;
 }
 """
 
