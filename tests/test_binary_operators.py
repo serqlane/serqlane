@@ -59,7 +59,7 @@ let y = x + 2;
     checking_executor(
         """
 let x = 1;
-;et y = x + x;
+let y = x + x;
 """,
         "y",
         2,
