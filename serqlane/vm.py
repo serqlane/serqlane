@@ -84,18 +84,16 @@ class SerqVM:
                 return self.eval(expression.inner)
 
             case NodeFnCall():
-                stack = self.stack.copy()
 
-                self.enter_scope()
-
-                print("fn call")
-                print(f"{expression.callee.symbol.name=}")
 
                 if expression.callee.symbol.name == "dbg":
                     val = self.eval(expression.args[0])
                     print(f"DBG: {val}")
                     return None
                 else:
+                    stack = self.stack.copy()
+                    self.enter_scope()
+                    
                     # TODO: Change these lines once function pointers exist
                     assert isinstance(expression.callee, NodeSymbol)
                     fn_def: NodeFnDefinition = expression.callee.symbol.definition_node
@@ -217,10 +215,10 @@ class SerqVM:
 if __name__ == "__main__":
     code = """
 let mut i = 0;
-while i < 10 {
+while true {
     i = i + 1;
-    if i == 2 {
-        dbg("reached 2");
+    if i % 100 == 0 {
+        dbg(i);
     }
 }
 """
