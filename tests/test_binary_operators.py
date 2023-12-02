@@ -61,3 +61,29 @@ let y = x + x;
         "y",
         2,
     )
+
+
+def test_type_inference(executor, checking_executor):
+    with pytest.raises(ValueError):
+        executor(
+            """
+let x = "abc";
+let y = x + 1;
+"""
+        )
+
+    with pytest.raises(ValueError):
+        executor("""
+let x: int32 = 10;
+let y: int64 = 20;
+let y: int64 = (x + x) - y;
+    """)
+
+    with pytest.raises(ValueError):
+        executor("let x = 1 == true;")
+
+    checking_executor("""
+let x = 100;
+let y = true;
+let z = x > 0 and (x == 100) or false;
+""", "z", True)

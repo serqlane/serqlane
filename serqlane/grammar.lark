@@ -87,7 +87,7 @@ return_type: expression
 !bool: "true" | "false"
 ?number: integer | decimal
 integer: /\d+/
-decimal: integer? "." integer
+decimal: /\d+\.\d+/
 string: "\"" /[^"]+/? "\""
 // TODO: char
 
