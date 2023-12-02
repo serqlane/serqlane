@@ -106,8 +106,7 @@ class SerqVM:
 
 if __name__ == "__main__":
     code = """
-// ; is olaf cope
-let x = (10 / (3 + 2));
+let x: int = "abc";
 """
 
     graph = ModuleGraph()
