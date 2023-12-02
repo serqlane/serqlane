@@ -71,14 +71,14 @@ class NodeStringLit(NodeLiteral[str]):
         return f"\"{self.value}\""
 
 class NodeLet(Node):
-    def __init__(self, sym: Symbol, expr: Node):
+    def __init__(self, sym_node: NodeSymbol, expr: Node):
         super().__init__()
-        self.sym = sym
+        self.sym_node = sym_node
         self.expr = expr
 
     def render(self) -> str:
-        is_mut = self.sym.mutable
-        return f"let {"mut " if is_mut else ""}{self.sym.name}{": " + self.sym.type.render()} = {self.expr.render()};"
+        is_mut = self.sym_node.symbol.mutable
+        return f"let {"mut " if is_mut else ""}{self.sym_node.render()}{": " + self.sym_node.type.render()} = {self.expr.render()};"
 
 class NodeAssignment(Node):
     def __init__(self, lhs: Node, rhs: Node) -> None:
@@ -455,7 +455,7 @@ class CompCtx(lark.visitors.Interpreter):
         return Type(kind=TypeKind.infer, sym=None)
 
     # overrides
-    def visit(self, tree: Tree, expected_type: Type) -> Node | Symbol: # TODO: Fix to only return Node
+    def visit(self, tree: Tree, expected_type: Type) -> Node:
         return self._visit_tree(tree, expected_type)
 
     def _visit_tree(self, tree: Tree, expected_type: Type):
@@ -696,8 +696,9 @@ class CompCtx(lark.visitors.Interpreter):
 
         sym = self.current_scope.put_let(ident, mutable=is_mut)
         sym.type = resolved_type
+        sym = NodeSymbol(sym, sym.type)
         return NodeLet(
-            sym=sym,
+            sym_node=sym,
             expr=val_node
         )
 
