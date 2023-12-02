@@ -487,7 +487,7 @@ class CompCtx(lark.visitors.Interpreter):
         if expr_type.kind in literal_types:
             # ensure we produce a concrete type
             # TODO: Once more complex types are added we gotta check both lhs and rhs
-            expr_type = expr_type.instantiate_literal()
+            expr_type = expr_type.instantiate_literal(self.graph)
 
         def ensure_types(lhs: Node, rhs: Node, expr_type: Type, into: Type):
             def conv_node(x: Node, t: Type):
