@@ -34,7 +34,7 @@
           pythonImportsCheck = [packageName];
           nativeBuildInputs = [python.pkgs.poetry-core];
           propagatedBuildInputs = [python.pkgs.lark];
-          #nativeCheckInputs = [python.pkgs.pytestCheckHook];
+          nativeCheckInputs = [python.pkgs.pytestCheckHook];
 
           meta.mainProgram = packageName;
         };
