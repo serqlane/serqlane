@@ -24,14 +24,30 @@ else_if: "else" if_condition
 else: "else" block
 
 
-binary_expression: expression plus expression
+// TODO: Merge everything like this to handle precedence accurately
+
+// lowest precedence
+binary_expression: \
+expression or expression
+| expression and expression
+
+| expression equals expression
+| expression not_equals expression
+
+| expression less expression
+| expression lesseq expression
+| expression greater expression
+| expression greatereq expression
+
+| expression plus expression
 | expression minus expression
+
 | expression modulus expression
 | expression star expression
 | expression slash expression
+
 | expression dot expression
-| expression and expression
-| expression or expression
+// highest precedence
 
 
 dot: "."
@@ -42,6 +58,14 @@ plus: "+"
 modulus: "%"
 and: "and"
 or: "or"
+
+equals: "=="
+not_equals: "!="
+less: "<"
+lesseq: "<="
+greater: ">"
+greatereq: ">="
+
 
 unary_expression: unary_operator? expression
 ?unary_operator: minus | plus | not | ampersand | star
@@ -65,6 +89,7 @@ return_type: expression
 integer: /\d+/
 decimal: integer? "." integer
 string: "\"" /[^"]+/? "\""
+// TODO: char
 
 ?terminator: ";"
 
