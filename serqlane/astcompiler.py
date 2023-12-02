@@ -6,6 +6,7 @@ from enum import Enum, auto
 import hashlib
 
 import lark.visitors
+from lark import Token, Tree
 
 from serqlane.parser import SerqParser
 
@@ -154,6 +155,9 @@ class Symbol:
         self.exported = exported
         self.mutable = mutable
 
+    def __repr__(self) -> str:
+        return f"<Symbol name={self.name}>"
+
     def render(self) -> str:
         # TODO: Use type info to render generics and others
         return self.name
@@ -232,6 +236,7 @@ arith_types = frozenset([
 logical_types = frozenset([
     TypeKind.literal_int,
     TypeKind.literal_bool,
+    TypeKind.bool,
 ] + list(int_types))
 
 
