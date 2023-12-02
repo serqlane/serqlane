@@ -4,8 +4,6 @@ from typing import Any
 from serqlane.astcompiler import *
 
 
-
-
 class SerqVM:
     def __init__(self) -> None:
         self.stack: list[dict[Symbol, Any]] = []
@@ -21,7 +19,7 @@ class SerqVM:
             case NodeDivExpression():
                 assert expression.type is not None
                 # TODO: should this be handled like this?
-                if expression.type.kind in int_types or expression.type.kind is TypeKind.literal_int:
+                if expression.type.kind in int_types:
                     operation = operator.floordiv
                 else:
                     operation = operator.truediv
@@ -49,7 +47,6 @@ class SerqVM:
                 raise RuntimeError("uninstatiated binary expression")
 
         return operation(self.eval(expression.lhs), self.eval(expression.rhs))
-
 
     def eval(self, expression: Node) -> Any:
         match expression:
@@ -100,4 +97,3 @@ let x = 5 / 2;
 
     vm = SerqVM()
     vm.execute_module(module)
-
