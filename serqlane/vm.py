@@ -122,6 +122,10 @@ class SerqVM:
                     self.execute_node(child)
                     self.exit_scope()
 
+                case NodeWhileStmt():
+                    while self.eval(child.cond_expr):
+                        self.execute_node(child.body)
+
                 case _:
                     raise NotImplementedError(f"{child=}")
 
@@ -138,9 +142,9 @@ class SerqVM:
 
 if __name__ == "__main__":
     code = """
-let mut i = 1;
-{
-    i = i + i;
+let mut i = 10;
+while i != 0 {
+    i = i - 1;
 }
 """
 
