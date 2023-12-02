@@ -14,7 +14,7 @@ class SerqVM:
         for symbol, value in frame.items():
             if symbol.name == name:
                 return value
-            
+
         raise ValueError(f"{name} not found in stack frame")
 
     def eval_binary_expression(self, expression: NodeBinaryExpr) -> Any:
@@ -36,8 +36,6 @@ class SerqVM:
                         raise RuntimeError(f"Got literal int in {expression}")
 
                     operation = operator.truediv
-                
-                print(f"{operation=} {expression=} {expression.type.kind=}")
 
             case NodeModExpression():
                 operation = operator.mod
@@ -72,8 +70,8 @@ class SerqVM:
             case NodeBinaryExpr():
                 return self.eval_binary_expression(expression)
 
-            case Symbol():
-                return self.stack[-1][expression]
+            case NodeSymbol():
+                return self.get_value_on_stack(expression.symbol)
 
             case NodeGrouped():
                 return self.eval(expression.inner)
@@ -87,8 +85,47 @@ class SerqVM:
     def exit_scope(self):
         self.stack.pop()
 
-    def push_scope(self, symbol: Symbol, value: Any):
+    def push_value_on_stack(self, symbol: Symbol, value: Any):
         self.stack[-1][symbol] = value
+
+    def set_value_on_stack(self, symbol: Symbol, value: Any):
+        for frame in reversed(self.stack):
+            if symbol in frame:
+                frame[symbol] = value
+                return
+
+        raise KeyError(f"{symbol} not found in scope")
+
+    def get_value_on_stack(self, symbol: Symbol) -> Any:
+        for frame in reversed(self.stack):
+            try:
+                return frame[symbol]
+            except KeyError:
+                pass
+
+        raise KeyError(f"{symbol} not found in scope")
+
+    def execute_node(self, line: NodeStmtList):
+        for child in line.children:
+            match child:
+                case NodeLet():
+                    self.push_value_on_stack(
+                        child.sym_node.symbol, self.eval(child.expr)
+                    )
+
+                case NodeAssignment():
+                    assert isinstance(child.lhs, NodeSymbol)
+                    self.set_value_on_stack(child.lhs.symbol, self.eval(child.rhs))
+
+                case NodeBlockStmt():
+                    self.enter_scope()
+                    self.execute_node(child)
+                    self.exit_scope()
+
+                case _:
+                    raise NotImplementedError(f"{child=}")
+
+            print(f"{self.stack=}")
 
     def execute_module(self, module: Module):
         start = module.ast
@@ -96,17 +133,17 @@ class SerqVM:
         assert start is not None and isinstance(start, NodeStmtList)
 
         self.enter_scope()
-
-        for child in start.children:
-            match child:
-                case NodeLet():
-                    self.push_scope(child.sym, self.eval(child.expr))
-            print(f"{self.stack=}")
+        self.execute_node(start)
 
 
 if __name__ == "__main__":
     code = """
-let x: int = "abc";
+let mut i = 1;
+{
+    i = i + (1 / i);
+    i = i / i;
+}
+i = i * i * 2;
 """
 
     graph = ModuleGraph()
@@ -115,4 +152,3 @@ let x: int = "abc";
 
     vm = SerqVM()
     vm.execute_module(module)
-

@@ -185,6 +185,9 @@ class Symbol:
         self.exported = exported
         self.mutable = mutable
 
+    def __repr__(self) -> str:
+        return f"<Symbol name={self.name}>"
+
     def render(self) -> str:
         # TODO: Use type info to render generics and others
         return self.name
