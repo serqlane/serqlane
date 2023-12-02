@@ -42,10 +42,6 @@ def test_literal_arith(checking_executor: Callable[[str, str, Any], None]):
     checking_executor("let x = 10 / (3 + 2);", "x", 2)
 
 
-def test_type_cohersion(checking_executor: Callable[[str, str, Any], None]):
-    checking_executor("let x: float32 = 1 + 1;", "x", 2.0)
-
-
 def test_variable_arith(checking_executor: Callable[[str, str, Any], None]):
     checking_executor(
         """

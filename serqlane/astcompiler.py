@@ -166,7 +166,7 @@ class Symbol:
 
 class TypeKind(Enum):
     error = auto() # bad type
-    empty = auto() # type that hasn't yet been filled. might be because it needs to be inferred
+    infer = auto() # marker type to let nodes know to infer their own types
     
     # literal types, haven't yet been matched
     literal_int = auto()
@@ -256,17 +256,13 @@ class Type:
         """
         other is always the target
         """
+        if self.kind == TypeKind.infer or other.kind == TypeKind.infer:
+            return True
+
         # TODO: Match variant, like generic inst of generic type
         match self.kind:
             case TypeKind.error:
                 return False
-            
-            case TypeKind.empty:
-                # types that are not allowed to be inferred
-                if other.kind in {TypeKind.error, TypeKind.empty}:
-                    return False
-                else:
-                    return True
             
             # TODO: Not sure what to do about these
             case TypeKind.unit:
@@ -425,6 +421,9 @@ class CompCtx(lark.visitors.Interpreter):
         self.graph = graph
         self.current_scope = self.module.global_scope
 
+    def get_infer_type(self) -> Type:
+        return Type(kind=TypeKind.infer, sym=None)
+
     # overrides
     def visit(self, tree: Tree, expected_type: Type) -> Node | Symbol: # TODO: Fix to only return Node
         return self._visit_tree(tree, expected_type)
@@ -451,46 +450,33 @@ class CompCtx(lark.visitors.Interpreter):
         inner = self.visit(tree.children[0], expected_type)
         return NodeGrouped(inner, inner.type)
 
-    def integer(self, tree: Tree, expected_type: Type):
+
+    def handle_literal(self, tree: Tree, expected_type: Type, lookup_name: str, literal_kind: TypeKind, node_type: Type[Node], conv_fn):
         val = tree.children[0].value
         if expected_type != None:
-            assert expected_type.types_compatible(Type(TypeKind.literal_int, sym=None))
-            return NodeIntLit(value=int(val), type=expected_type)
+            if expected_type.kind == TypeKind.infer:
+                expected_type = self.current_scope.lookup_type(lookup_name, shallow=True)
+            else:
+                assert expected_type.types_compatible(Type(literal_kind, sym=None))
+            return node_type(value=conv_fn(val), type=expected_type)
         else:
-            return NodeIntLit(value=int(val), type=Type(TypeKind.literal_int, sym=None))
+            return node_type(value=conv_fn(val), type=Type(literal_kind, sym=None))
+
+    def integer(self, tree: Tree, expected_type: Type):
+        return self.handle_literal(tree, expected_type, "int", TypeKind.literal_int, NodeIntLit, int)
     
     def decimal(self, tree: Tree, expected_type: Type):
-        val = f"{tree.children[0].children[0].value}.{tree.children[1].children[0].value}"
-        if expected_type != None:
-            assert expected_type.types_compatible(Type(TypeKind.literal_float, sym=None))
-            return NodeFloatLit(value=float(val), type=expected_type)
-        else:
-            return NodeFloatLit(value=float(val), type=Type(TypeKind.literal_float, sym=None))
+        return self.handle_literal(tree, expected_type, "float", TypeKind.literal_float, NodeFloatLit, float)
     
     def bool(self, tree: Tree, expected_type: Type):
-        val = tree.children[0].value
-        if expected_type != None:
-            assert expected_type.types_compatible(Type(TypeKind.literal_bool, sym=None))
-            return NodeBoolLit(value = val == "true", type=expected_type)
-        else:
-            return NodeBoolLit(value = val == "true", type=Type(TypeKind.literal_bool, sym=None))
+        return self.handle_literal(tree, expected_type, "bool", TypeKind.literal_bool, NodeBoolLit, lambda x: x == "true")
     
     def string(self, tree: Tree, expected_type: Type):
-        val = tree.children[0].value
-        if expected_type != None:
-            assert expected_type.types_compatible(Type(TypeKind.literal_string, sym=None))
-            return NodeStringLit(value=val, type=expected_type)
-        else:
-            return NodeStringLit(value=val, type=Type(TypeKind.literal_string, sym=None))
+        return self.handle_literal(tree, expected_type, "string", TypeKind.literal_string, NodeStringLit, str)
 
 
     def binary_expression(self, tree: Tree, expected_type: Type):
         lhs = self.visit(tree.children[0], None)
-        # TODO: Check for expected type:
-        #  - if type is unrelated like (1 == 1): bool then instantiate lhs and rhs to default
-        #  - if the type is related coerce both sides
-        #  - if coercion makes no sense error
-
         # TODO: Can the symbol be captured somehow?
         op = tree.children[1].data.value
         rhs = self.visit(tree.children[2], None)
@@ -502,22 +488,33 @@ class CompCtx(lark.visitors.Interpreter):
         
         # Type coercion. Revisits "broken" nodes and tries to apply the new info on them 
         # TODO: Parts of this should probably be pulled into a new function
-        expr_type = lhs.type if lhs.type.kind not in literal_types else rhs.type
-        if lhs.type.kind not in literal_types and rhs.type.kind in literal_types:
-            rhs = self.visit(tree.children[2], expr_type)
-        elif rhs.type.kind not in literal_types and lhs.type.kind in literal_types:
-            lhs = self.visit(tree.children[0], expr_type)
-        elif expr_type.kind in literal_types:
-            if expected_type != None and expr_type.types_compatible(expected_type):
-                expr_type = expected_type
-                lhs = self.visit(tree.children[0], expr_type)
-                rhs = self.visit(tree.children[2], expr_type)
-            elif expected_type == None:
-                pass # Leave them be unidentified. This is a first inner run from the start of the function, we don't have enough info yet.
-            else:
-                assert False
+        expr_type: Type = lhs.type if lhs.type.kind not in literal_types else rhs.type
+
+        # if there is a known type, spread it around
+        if lhs.type.kind in literal_types and rhs.type.kind not in literal_types:
+            lhs = self.visit(tree.children[0], rhs.type)
+        elif rhs.type.kind in literal_types and lhs.type.kind not in literal_types:
+            rhs = self.visit(tree.children[2], lhs.type)
+        
+        # both literal
         else:
-            assert False
+            # if possible we ask for help from expected_type
+            if expected_type != None and expr_type.types_compatible(expected_type):
+                lhs = self.visit(tree.children[0], expected_type)
+                rhs = self.visit(tree.children[2], expected_type)
+                assert lhs.type.types_compatible(rhs.type)
+                expr_type = lhs.type
+
+            # no expectation, let them infer their own types
+            elif expected_type == None:
+                lhs = self.visit(tree.children[0], self.get_infer_type())
+                rhs = self.visit(tree.children[2], self.get_infer_type())
+                assert lhs.type.types_compatible(rhs.type)
+                expr_type = lhs.type
+            
+            # there is an expected type but the expression isn't compatible with it
+            else:
+                assert False, f"{expected_type.kind=}    {expr_type.kind}"
 
         match op:
             case "plus":
@@ -608,7 +605,8 @@ class CompCtx(lark.visitors.Interpreter):
             assert isinstance(type_sym, Symbol)
             f += 1
         
-        val_node = self.visit(tree.children[f], type_sym.type if type_sym != None else None)
+        val_node_expected_type = type_sym.type if type_sym != None else self.get_infer_type()
+        val_node = self.visit(tree.children[f], val_node_expected_type)
 
         resolved_type = None
         if type_sym != None:
@@ -626,9 +624,8 @@ class CompCtx(lark.visitors.Interpreter):
             if val_node.type.kind in builtin_userspace_types:
                 resolved_type = val_node.type
             else:
-                assert val_node.type.kind in literal_types
-                resolved_type = val_node.type.instantiate_literal(self.graph)
-                val_node = self.visit(tree.children[f], resolved_type)
+                # Literals infer their own types to the default if told to do so
+                assert False
 
         f += 1
         assert len(tree.children) == f
