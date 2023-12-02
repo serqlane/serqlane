@@ -1,114 +1,95 @@
-from __future__ import annotations
+import operator
+from typing import Any
 
-import weakref
-from dataclasses import dataclass
-from typing import Any, Self
-
-from lark import Token, Tree
-
-from serqlane.parser import SerqParser
+from serqlane.astcompiler import *
 
 
-@dataclass
-class Wrapper:
-    value: Any
-    mutable: bool
-
-
-@dataclass
-class FunctionWrapper(Wrapper):
-    scope: Scope
-
-
-class Scope:
-    def __init__(
-        self, parent: Scope | None = None, *, values: dict[str, Wrapper] | None = None
-    ) -> None:
-        self.parent = parent
-        self.values: dict[str, Wrapper] = values or {}
-
-    def lookup(self, name: str) -> Wrapper:
-        try:
-            return self.values[name]
-        except KeyError:
-            parent = self.parent
-            while parent is not None:
-                try:
-                    return parent.lookup(name)
-                except ValueError:
-                    parent = parent.parent
-
-            raise ValueError(f"{name} not found in scope")
-
-    def add_function(self, name: str, tree: Tree[Token]):
-        if self.values.get(name) is not None:
-            raise ValueError(f"{name} is already set")
-
-        self.values[name] = FunctionWrapper(tree, mutable=False, scope=self.copy())
-
-    def add(self, name: str, value: Any, mutable: bool = False):
-        if self.values.get(name) is not None:
-            raise ValueError(f"{name} is already set")
-
-        self.values[name] = Wrapper(value, mutable)
-
-    def set(self, name: str, value: Any):
-        """Modify mutable value
-
-        Args:
-            name (str): name of the value to modify
-            value (Any): value to set as
-        """
-        try:
-            wrapper = self.values[name]
-        except KeyError:
-            raise KeyError(f"{name} is not in scope")
-        else:
-            if not wrapper.mutable:
-                raise ValueError(f"{name} is not mutable")
-
-            wrapper.value = value
-
-    def copy(self) -> Self:
-        return type(self)(parent=self.parent, values=self.values.copy())
 
 
 class SerqVM:
     def __init__(self) -> None:
-        self.current_scope: Scope = Scope()
-        self.stack: list[Tree[Token]] = []
+        self.stack: list[dict[Symbol, Any]] = []
 
-    # def run(self, tree: Tree[Token]):
-    #     for child in tree.children:
-    #         if isinstance(child, Tree):
-    #             base: Token = child.data # type: ignore
-    #         else:
-    #             base = child
+    def eval(self, expression: Node) -> Any:
+        if isinstance(expression, NodeLiteral):
+            return expression.value
 
-    #         print(f"{child.data=}")
-    #         print(f"{base.type=}")
+        elif isinstance(expression, NodeBinaryExpr):
+            match expression:
+                case NodePlusExpr():
+                    operation = operator.add
+                case NodeMinusExpression():
+                    operation = operator.sub
+                case NodeMulExpression():
+                    operation = operator.mul
+                case NodeDivExpression():
+                    operation = operator.truediv
+                case NodeModExpression():
+                    operation = operator.mod
+                case NodeAndExpression():
+                    operation = operator.and_
+                case NodeOrExpression():
+                    operation = operator.or_
+                case NodeEqualsExpression():
+                    operation = operator.eq
+                case NodeNotEqualsExpression():
+                    operation = operator.ne
+                case NodeLessExpression():
+                    operation = operator.lt
+                case NodeLessEqualsExpression():
+                    operation = operator.le
+                case NodeGreaterExpression():
+                    operation = operator.gt
+                case NodeGreaterEqualsExpression():
+                    operation = operator.ge
+                case NodeDotExpr():
+                    raise NotImplementedError()
+                case NodeBinaryExpr():
+                    raise RuntimeError("uninstatiated binary expression")
 
-    #         match base.value:
-    #             case "define":
-    #                 self.do_define(child) # type: ignore
+            return operation(self.eval(expression.lhs), self.eval(expression.rhs))
 
-    # def do_define(self, tree: Tree[Token]):
-    #     children = tree.children
-    #     if isinstance(children[0], Token):
-    #         mutable = children[0].type == "MUT"
 
-    #     print(f"{mutable=} {tree.children=}")
+    def enter_scope(self):
+        self.stack.append({})
 
-    # def do_assignment(self, tree: Tree[Token]) -> Any:
-    #     name = tree.children[0].value # type: ignore
+    def exit_scope(self):
+        self.stack.pop()
 
-    # def evaluate_expression(self):
-    #     ...
+    def push_scope(self, symbol: Symbol, value: Any):
+        self.stack[-1][symbol] = value
+
+    def execute_module(self, module: Module):
+        start = module.ast
+
+        assert start is not None and isinstance(start, NodeStmtList)
+
+        self.enter_scope()
+
+        for child in start.children:
+            print(f"{child=}")
+            match child:
+                case NodeLet():
+                    print(f"{child.expr=}")
+                    self.push_scope(child.sym, self.eval(child.expr))
+            print(f"{self.stack=}")
+
+
+
+
+
 
 
 if __name__ == "__main__":
-    test = "let x = 1;"
-    parser = SerqParser()
-    tree = parser.parse(test)
+    code = """
+// ; is olaf cope
+let x = false or true;
+"""
+
+    graph = ModuleGraph()
+    module = graph.load("<string>", code)
+    print(module.ast.render())
+
     vm = SerqVM()
-    #vm.run(tree)
+    vm.execute_module(module)
+

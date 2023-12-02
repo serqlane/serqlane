@@ -6,6 +6,7 @@ from enum import Enum, auto
 import hashlib
 
 import lark.visitors
+from lark import Token, Tree
 
 from serqlane.parser import SerqParser
 
@@ -232,6 +233,7 @@ arith_types = frozenset([
 logical_types = frozenset([
     TypeKind.literal_int,
     TypeKind.literal_bool,
+    TypeKind.bool,
 ] + list(int_types))
 
 
