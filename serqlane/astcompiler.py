@@ -168,6 +168,21 @@ class NodeGreaterEqualsExpression(NodeBinaryExpr):
 
 
 # others
+class NodeBreak(Node):
+    def __init__(self) -> None:
+        super().__init__(None)
+
+    def render(self) -> str:
+        return "break;"
+
+class NodeContinue(Node):
+    def __init__(self) -> None:
+        super().__init__(None)
+
+    def render(self) -> str:
+        return "continue;"
+
+
 class NodeBlockStmt(NodeStmtList):
     def __init__(self, scope: Scope) -> None:
         super().__init__()
@@ -478,6 +493,7 @@ class CompCtx(lark.visitors.Interpreter):
         self.module = module
         self.graph = graph
         self.current_scope = self.module.global_scope
+        self.in_loop_counter = 0
 
     def get_infer_type(self) -> Type:
         return Type(kind=TypeKind.infer, sym=None)
@@ -510,6 +526,26 @@ class CompCtx(lark.visitors.Interpreter):
         return self.visit(tree.children[0], expected_type)
 
 
+    def handle_break_or_continue(self, tree: Tree, expected_type: Type):
+        assert expected_type == None
+        assert len(tree.children) == 0
+        if self.in_loop_counter < 1:
+            raise ValueError("Break or continue outside of a loop")
+        if tree.data == "break_stmt":
+            return NodeBreak()
+        elif tree.data == "continue_stmt":
+            return NodeContinue()
+        else:
+            raise ValueError(f"Somehow a bad break or continue has been given: {tree.data}")
+        
+
+    def break_stmt(self, tree: Tree, expected_type: Type):
+        return self.handle_break_or_continue(tree, expected_type)
+
+    def continue_stmt(self, tree: Tree, expected_type: Type):
+        return self.handle_break_or_continue(tree, expected_type)
+
+
     def while_stmt(self, tree: Tree, expected_type: Type):
         assert expected_type == None
         # This has to use the outer scope, so a new scope is only opened once this has been checked in full
@@ -517,7 +553,9 @@ class CompCtx(lark.visitors.Interpreter):
         assert while_cond.type.kind == TypeKind.bool
 
         # block_stmt opens a scope
+        self.in_loop_counter += 1 # needed to check if break and continue are valid
         body = self.visit(tree.children[1], None)
+        self.in_loop_counter -= 1
         assert isinstance(body, NodeBlockStmt)
 
         return NodeWhileStmt(while_cond, body)
