@@ -486,14 +486,18 @@ class CompCtx(lark.visitors.Interpreter):
         expr_type = lhs.type
 
         # TODO: Pull these converters into a member function. It will probably be used more often
-        if expr_type.kind in literal_types:
+        if lhs.type.kind in literal_types or rhs.type.kind in literal_types:
             # ensure we produce a concrete type
             # TODO: Once more complex types are added we gotta check both lhs and rhs
             if expected_type != None:
-                assert expected_type.types_compatible(expr_type)
                 expr_type = expected_type
+                # TODO: Make sure this can't cause infinite recursion
+                lhs = self.visit(tree.children[0], expr_type)
+                rhs = self.visit(tree.children[2], expr_type)
+                assert expected_type.types_compatible(expr_type), f"{expected_type.kind=}   {expr_type.kind=}"
             else:
                 expr_type = expr_type.instantiate_literal(self.graph)
+
         def ensure_types(lhs: Node, rhs: Node, expr_type: Type, into: Type):
             def conv_node(x: Node, t: Type):
                 if x.type.kind in literal_types:
@@ -514,7 +518,6 @@ class CompCtx(lark.visitors.Interpreter):
                 # TODO: Check if this makes sense
                 conv_node(lhs, into)
                 conv_node(rhs, into)
-
 
         match op:
             case "plus":
