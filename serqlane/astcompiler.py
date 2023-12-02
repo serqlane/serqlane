@@ -251,6 +251,7 @@ class Type:
         self.sym = sym
         # TODO: Add a type id later
 
+    # TODO: Turn into type_relation. literal<->concrete means uninstantiated_literal
     def types_compatible(self, other: Type) -> bool:
         """
         other is always the target
@@ -452,20 +453,35 @@ class CompCtx(lark.visitors.Interpreter):
 
     def integer(self, tree: Tree, expected_type: Type):
         val = tree.children[0].value
-        # untyped at this stage
-        return NodeIntLit(value=int(val), type=Type(TypeKind.literal_int, sym=None))
+        if expected_type != None:
+            assert expected_type.types_compatible(Type(TypeKind.literal_int, sym=None))
+            return NodeIntLit(value=int(val), type=expected_type)
+        else:
+            return NodeIntLit(value=int(val), type=Type(TypeKind.literal_int, sym=None))
     
     def decimal(self, tree: Tree, expected_type: Type):
         val = f"{tree.children[0].children[0].value}.{tree.children[1].children[0].value}"
-        return NodeFloatLit(value=float(val), type=Type(TypeKind.literal_float, sym=None))
+        if expected_type != None:
+            assert expected_type.types_compatible(Type(TypeKind.literal_float, sym=None))
+            return NodeFloatLit(value=float(val), type=expected_type)
+        else:
+            return NodeFloatLit(value=float(val), type=Type(TypeKind.literal_float, sym=None))
     
     def bool(self, tree: Tree, expected_type: Type):
         val = tree.children[0].value
-        return NodeBoolLit(value = val == "true", type=Type(TypeKind.literal_bool, sym=None))
+        if expected_type != None:
+            assert expected_type.types_compatible(Type(TypeKind.literal_bool, sym=None))
+            return NodeBoolLit(value = val == "true", type=expected_type)
+        else:
+            return NodeBoolLit(value = val == "true", type=Type(TypeKind.literal_bool, sym=None))
     
     def string(self, tree: Tree, expected_type: Type):
         val = tree.children[0].value
-        return NodeStringLit(value=val, type=Type(TypeKind.literal_string, sym=None))
+        if expected_type != None:
+            assert expected_type.types_compatible(Type(TypeKind.literal_string, sym=None))
+            return NodeStringLit(value=val, type=expected_type)
+        else:
+            return NodeStringLit(value=val, type=Type(TypeKind.literal_string, sym=None))
 
 
     def binary_expression(self, tree: Tree, expected_type: Type):
@@ -479,101 +495,72 @@ class CompCtx(lark.visitors.Interpreter):
         op = tree.children[1].data.value
         rhs = self.visit(tree.children[2], None)
 
-        # TODO: Dot expr, decide if int/int=float or int/int=int
+        # TODO: Dot expr
         if not lhs.type.types_compatible(rhs.type):
             # TODO: Error reporting
             raise ValueError(f"Incompatible values in binary expression: `{lhs.render()}`:{lhs.type.render()} {op} `{rhs.render()}`:{rhs.type.render()}")
-        expr_type = lhs.type
-
-        # TODO: Pull these converters into a member function. It will probably be used more often
-        if lhs.type.kind in literal_types or rhs.type.kind in literal_types:
-            # ensure we produce a concrete type
-            # TODO: Once more complex types are added we gotta check both lhs and rhs
-            if expected_type != None:
+        
+        # Type coercion. Revisits "broken" nodes and tries to apply the new info on them 
+        # TODO: Parts of this should probably be pulled into a new function
+        expr_type = lhs.type if lhs.type.kind not in literal_types else rhs.type
+        if lhs.type.kind not in literal_types and rhs.type.kind in literal_types:
+            rhs = self.visit(tree.children[2], expr_type)
+        elif rhs.type.kind not in literal_types and lhs.type.kind in literal_types:
+            lhs = self.visit(tree.children[0], expr_type)
+        elif expr_type.kind in literal_types:
+            if expected_type != None and expr_type.types_compatible(expected_type):
                 expr_type = expected_type
-                # TODO: Make sure this can't cause infinite recursion
                 lhs = self.visit(tree.children[0], expr_type)
                 rhs = self.visit(tree.children[2], expr_type)
-                assert expected_type.types_compatible(expr_type), f"{expected_type.kind=}   {expr_type.kind=}"
+            elif expected_type == None:
+                pass # Leave them be unidentified. This is a first inner run from the start of the function, we don't have enough info yet.
             else:
-                expr_type = expr_type.instantiate_literal(self.graph)
-
-        def ensure_types(lhs: Node, rhs: Node, expr_type: Type, into: Type):
-            def conv_node(x: Node, t: Type):
-                if x.type.kind in literal_types:
-                    x.type = t
-                elif x.type.kind in builtin_userspace_types:
-                    pass # the type is already good
-                else:
-                    raise ValueError(f"Bad instantiation: {lhs.type.kind}")
-
-            assert expr_type.kind not in literal_types
-            if into == None:
-                # We decide what type it is
-                conv_node(lhs, expr_type)
-                conv_node(rhs, expr_type)
-            else:
-                # We have to coerce or ensure equality
-                assert expr_type.types_compatible(into), f"{expr_type.kind=} != {into.kind}"
-                # TODO: Check if this makes sense
-                conv_node(lhs, into)
-                conv_node(rhs, into)
+                assert False
+        else:
+            assert False
 
         match op:
             case "plus":
                 assert expr_type.kind in arith_types
-                ensure_types(lhs, rhs, expr_type, expected_type)
                 return NodePlusExpr(lhs, rhs, type=expr_type)
             case "minus":
                 assert expr_type.kind in arith_types
-                ensure_types(lhs, rhs, expr_type, expected_type)
                 return NodeMinusExpression(lhs, rhs, type=expr_type)
             case "star":
                 assert expr_type.kind in arith_types
-                ensure_types(lhs, rhs, expr_type, expected_type)
                 return NodeMulExpression(lhs, rhs, type=expr_type)
             case "slash":
                 assert expr_type.kind in arith_types
-                ensure_types(lhs, rhs, expr_type, expected_type)
                 return NodeDivExpression(lhs, rhs, type=expr_type)
             
             case "modulus":
                 assert expr_type.kind in int_types
-                ensure_types(lhs, rhs, expr_type, expected_type)
                 return NodeModExpression(lhs, rhs, type=expr_type)
             
             case "and":
                 assert expr_type.kind in logical_types
-                ensure_types(lhs, rhs, expr_type, expected_type)
                 return NodeAndExpression(lhs, rhs, type=expr_type)
             case "or":
                 assert expr_type.kind in logical_types
-                ensure_types(lhs, rhs, expr_type, expected_type)
                 return NodeOrExpression(lhs, rhs, type=expr_type)
             
             # TODO: Is this version of ensure_types correct here?
             case "equals":
-                ensure_types(lhs, rhs, expr_type, expr_type)
                 return NodeEqualsExpression(lhs, rhs, type=self.current_scope.lookup_type("bool"))
             case "not_equals":
-                ensure_types(lhs, rhs, expr_type, expr_type)
                 return NodeNotEqualsExpression(lhs, rhs, type=self.current_scope.lookup_type("bool"))
             case "less":
                 # TODO: Ordinal types.
                 assert expr_type.kind in arith_types
-                ensure_types(lhs, rhs, expr_type, expr_type)
                 return NodeLessExpression(lhs, rhs, type=self.current_scope.lookup_type("bool"))
             case "lesseq":
                 assert expr_type.kind in arith_types
-                ensure_types(lhs, rhs, expr_type, expr_type)
                 return NodeLessEqualsExpression(lhs, rhs, type=self.current_scope.lookup_type("bool"))
             case "greater":
                 assert expr_type.kind in arith_types
-                ensure_types(lhs, rhs, expr_type, expr_type)
                 return NodeGreaterExpression(lhs, rhs, type=self.current_scope.lookup_type("bool"))
             case "greatereq":
                 assert expr_type.kind in arith_types
-                ensure_types(lhs, rhs, expr_type, expr_type)
                 return NodeGreaterEqualsExpression(lhs, rhs, type=self.current_scope.lookup_type("bool"))
 
             case "dot":
@@ -587,6 +574,8 @@ class CompCtx(lark.visitors.Interpreter):
         val = tree.children[0].value
         sym = self.current_scope.lookup(val)
         if sym:
+            if expected_type != None:
+                sym.type.types_compatible(expected_type)
             return sym
         # TODO: Error reporting
         raise ValueError(f"Bad identifier: {val}")
