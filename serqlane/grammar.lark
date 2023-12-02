@@ -1,6 +1,6 @@
 start: statement*
 
-statement: (expression | assignment | return | let_stmt | function_definition) terminator
+statement: ((expression | assignment | return | let_stmt) _terminator) | block_stmt
 
 user_type: ":" expression
 
@@ -10,18 +10,13 @@ assignment: identifier "=" expression
 
 return: "return" expression
 
-block: "{" statement* "}"
+block_stmt: _block
+_block: "{" statement* "}" // TODO: There is no such thing as a block expression right now
 
-expression: if_expression | block | literal | identifier | function_call | binary_expression | unary_expression | grouped_expression
+while_stmt: "while" _block
+
+expression: literal | identifier | binary_expression | unary_expression | grouped_expression
 grouped_expression: "(" expression ")"
-
-function_call: identifier "(" function_args? ")"
-function_args: ((identifier "=")? expression ","?)+
-
-if_expression: if_condition (else_if+)? else?
-if_condition: "if" expression block
-else_if: "else" if_condition
-else: "else" block
 
 
 // TODO: Merge everything like this to handle precedence accurately
@@ -75,9 +70,6 @@ ampersand: "&"
 
 identifier: /[a-zA-Z](\w|\d)*/
 
-function_definition: pub_modifier? "fn" identifier function_def_args return_type? block
-function_def_args: "(" (typed_arg ","?)+ ")"
-
 pub_modifier: "pub"
 
 typed_arg: identifier user_type
@@ -91,7 +83,7 @@ decimal: /\d+\.\d+/
 string: "\"" /[^"]+/? "\""
 // TODO: char
 
-?terminator: ";"
+_terminator: ";"
 
 COMMENT: /\s*/ "//" /[^\n]/*
 %ignore COMMENT

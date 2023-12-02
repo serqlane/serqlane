@@ -4,6 +4,7 @@ from typing import Any, Optional
 from enum import Enum, auto
 
 import hashlib
+import textwrap
 
 import lark.visitors
 from lark import Token, Tree
@@ -15,8 +16,17 @@ class Node:
     def __init__(self, type: Type | None = None) -> None:
         self.type = type
 
-    def render(self, indent=0) -> str:
+    def render(self) -> str:
         raise NotImplementedError()
+
+class NodeSymbol(Node):
+    def __init__(self, symbol: Symbol, type: Type | None = None) -> None:
+        super().__init__(type)
+        self.symbol = symbol
+
+    def render(self) -> str:
+        # TODO: Unique global identifier later
+        return f"{self.symbol.name}"
 
 class NodeStmtList(Node):
     def __init__(self) -> None:
@@ -26,7 +36,7 @@ class NodeStmtList(Node):
     def add(self, node: Node):
         self.children.append(node)
 
-    def render(self, indent=0) -> str:
+    def render(self) -> str:
         result = []
         for child in self.children:
             result.append(child.render())
@@ -66,9 +76,18 @@ class NodeLet(Node):
         self.sym = sym
         self.expr = expr
 
-    def render(self, indent=0) -> str:
+    def render(self) -> str:
         is_mut = self.sym.mutable
-        return f"{" " * indent}let {"mut " if is_mut else ""}{self.sym.name}{": " + self.sym.type.render()} = {self.expr.render()};"
+        return f"let {"mut " if is_mut else ""}{self.sym.name}{": " + self.sym.type.render()} = {self.expr.render()};"
+
+class NodeAssignment(Node):
+    def __init__(self, lhs: Node, rhs: Node) -> None:
+        super().__init__(None)
+        self.lhs = lhs
+        self.rhs = rhs
+
+    def render(self) -> str:
+        return f"{self.lhs.render()} = {self.rhs.render()}"
 
 
 class NodeGrouped(Node):
@@ -76,7 +95,7 @@ class NodeGrouped(Node):
         super().__init__(type)
         self.inner = inner
     
-    def render(self, indent=0) -> str:
+    def render(self) -> str:
         return f"({self.inner.render()})"
 
 
@@ -87,66 +106,76 @@ class NodeBinaryExpr(Node):
         self.rhs = rhs
 
 class NodeDotExpr(NodeBinaryExpr):
-    def render(self, indent=0) -> str:
+    def render(self) -> str:
         return f"({self.lhs.render()}.{self.rhs.render()})"
 
 # TODO: These could be converted into (infix) functions to be stored as op(lhs, rhs) in reimpl
 # arith
 class NodePlusExpr(NodeBinaryExpr):
-    def render(self, indent=0) -> str:
+    def render(self) -> str:
         return f"({self.lhs.render()} + {self.rhs.render()})"
 
 class NodeMinusExpression(NodeBinaryExpr):
-    def render(self, indent=0) -> str:
+    def render(self) -> str:
         return f"({self.lhs.render()} - {self.rhs.render()})"
 
 class NodeMulExpression(NodeBinaryExpr):
-    def render(self, indent=0) -> str:
+    def render(self) -> str:
         return f"({self.lhs.render()} * {self.rhs.render()})"
 
 class NodeDivExpression(NodeBinaryExpr):
-    def render(self, indent=0) -> str:
+    def render(self) -> str:
         return f"({self.lhs.render()} / {self.rhs.render()})"
 
 # int only
 class NodeModExpression(NodeBinaryExpr):
-    def render(self, indent=0) -> str:
+    def render(self) -> str:
         return f"({self.lhs.render()} % {self.rhs.render()})"
 
 # logic
 class NodeAndExpression(NodeBinaryExpr):
-    def render(self, indent=0) -> str:
+    def render(self) -> str:
         return f"({self.lhs.render()} and {self.rhs.render()})"
 
 class NodeOrExpression(NodeBinaryExpr):
-    def render(self, indent=0) -> str:
+    def render(self) -> str:
         return f"({self.lhs.render()} or {self.rhs.render()})"
 
 # comparison
 class NodeEqualsExpression(NodeBinaryExpr):
-    def render(self, indent=0) -> str:
+    def render(self) -> str:
         return f"({self.lhs.render()} == {self.rhs.render()})"
 
 class NodeNotEqualsExpression(NodeBinaryExpr):
-    def render(self, indent=0) -> str:
+    def render(self) -> str:
         return f"({self.lhs.render()} != {self.rhs.render()})"
     
 class NodeLessExpression(NodeBinaryExpr):
-    def render(self, indent=0) -> str:
+    def render(self) -> str:
         return f"({self.lhs.render()} < {self.rhs.render()})"
 
 class NodeLessEqualsExpression(NodeBinaryExpr):
-    def render(self, indent=0) -> str:
+    def render(self) -> str:
         return f"({self.lhs.render()} <= {self.rhs.render()})"
     
 class NodeGreaterExpression(NodeBinaryExpr):
-    def render(self, indent=0) -> str:
+    def render(self) -> str:
         return f"({self.lhs.render()} > {self.rhs.render()})"
 
 class NodeGreaterEqualsExpression(NodeBinaryExpr):
-    def render(self, indent=0) -> str:
+    def render(self) -> str:
         return f"({self.lhs.render()} >= {self.rhs.render()})"
 
+
+# others
+class NodeBlockStmt(NodeStmtList):
+    def __init__(self, scope: Scope) -> None:
+        super().__init__()
+        self.scope = scope # TODO: Should this actually be stored?
+
+    def render(self) -> str:
+        inner = super().render()
+        return f"{{\n{textwrap.indent(inner, "  ")}\n}}"
 
 class Symbol:
     def __init__(self, name: str, type: Type | None = None, exported: bool = False, mutable: bool = False) -> None:
@@ -155,9 +184,6 @@ class Symbol:
         self.type = type
         self.exported = exported
         self.mutable = mutable
-
-    def __repr__(self) -> str:
-        return f"<Symbol name={self.name}>"
 
     def render(self) -> str:
         # TODO: Use type info to render generics and others
@@ -371,7 +397,7 @@ class Scope:
         if shallow or self.parent == None:
             # TODO: Report error in module
             return None
-        return self._lookup_impl(name)
+        return self.parent._lookup_impl(name)
 
     def lookup(self, name: str, shallow=False) -> Optional[Symbol]:
         # Must be unambiguous, can return an unexported symbol. Checked at calltime
@@ -405,11 +431,15 @@ class Scope:
         sym.mutable = mutable
         return sym
 
-    def make_sibling() -> Scope:
-        pass
+    def make_sibling(self) -> Scope:
+        res = Scope(self.module_graph)
+        res.parent = self.parent
+        return res
 
     def make_child(self) -> Scope:
-        ...
+        res = Scope(self.module_graph)
+        res.parent = self
+        return res
 
     def merge(self, other: Scope):
         ...
@@ -442,10 +472,27 @@ class CompCtx(lark.visitors.Interpreter):
                 for child in tree.children]
 
     def __default__(self, tree, expected_type: Type):
+        raise ValueError(f"{tree=}")
         return self.visit_children(tree, expected_type)
 
 
     # new functions
+    def statement(self, tree: Tree, expected_type: Type):
+        assert len(tree.children) == 1, f"{len(tree.children)} --- {tree.children=}"
+        return self.visit(tree.children[0], expected_type)
+
+
+
+    def block_stmt(self, tree: Tree, expected_type: Type):
+        assert expected_type == None
+        self.current_scope = self.current_scope.make_child()
+        result = NodeBlockStmt(self.current_scope)
+        # Have to be very careful with symbols, we do not want to use one that only exists later
+        for child in tree.children:
+            result.add(self.visit(child, None))
+        self.current_scope = self.current_scope.parent
+        return result
+
     def grouped_expression(self, tree: Tree, expected_type: Type):
         inner = self.visit(tree.children[0], expected_type)
         return NodeGrouped(inner, inner.type)
@@ -573,12 +620,29 @@ class CompCtx(lark.visitors.Interpreter):
         if sym:
             if expected_type != None:
                 sym.type.types_compatible(expected_type)
-            return sym
+            return NodeSymbol(sym, type=sym.type)
         # TODO: Error reporting
         raise ValueError(f"Bad identifier: {val}")
 
     def user_type(self, tree: Tree, expected_type: Type):
         return self.visit(tree.children[0], None) # TODO: Enforce `type` metatype
+
+    def assignment(self, tree: Tree, expected_type: Type):
+        # TODO: Assignments could technically act as expressions too
+        assert expected_type == None
+
+        lhs = self.visit(tree.children[0], None)
+        rhs = self.visit(tree.children[1], lhs.type)
+        assert lhs.type.types_compatible(rhs.type)
+
+        match lhs:
+            case NodeSymbol():
+                if not lhs.symbol.mutable:
+                    raise ValueError(f"{lhs.symbol.name} is not mutable")
+            case _:
+                raise NotImplementedError
+        
+        return NodeAssignment(lhs, rhs)
 
     def let_stmt(self, tree: Tree, expected_type: Type):
         mut_node = tree.children[0]
@@ -654,8 +718,8 @@ class CompCtx(lark.visitors.Interpreter):
         result = NodeStmtList()
         for child in tree.children:
             node = self.visit(child, None) # TODO: Force None for now
-            assert len(node) == 2 and node[1] == []
-            result.add(node[0])
+            assert isinstance(node, Node)
+            result.add(node)
         return result
 
 
