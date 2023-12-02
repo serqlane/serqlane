@@ -59,15 +59,14 @@ class NodeStringLit(NodeLiteral[str]):
         return f"\"{self.value}\""
 
 class NodeLet(Node):
-    def __init__(self, sym: Symbol, type_sym: Symbol, expr: Node):
+    def __init__(self, sym: Symbol, expr: Node):
         super().__init__()
         self.sym = sym
-        self.type_sym = type_sym # TODO: store as a type hint node instead of sym
         self.expr = expr
 
     def render(self, indent=0) -> str:
         is_mut = self.sym.mutable
-        return f"{" " * indent}let {"mut " if is_mut else ""}{self.sym.name}{": " + self.type_sym.render() if self.type_sym != None else ""} = {self.expr.render()};"
+        return f"{" " * indent}let {"mut " if is_mut else ""}{self.sym.name}{": " + self.sym.type.render()} = {self.expr.render()};"
 
 
 class NodeGrouped(Node):
@@ -526,7 +525,6 @@ class CompCtx(lark.visitors.Interpreter):
         ident_node = tree.children[f]
         assert ident_node.data == "identifier"
         ident = ident_node.children[0].value
-        sym = self.current_scope.put_let(ident, mutable=is_mut)
 
         f += 1
 
@@ -540,25 +538,31 @@ class CompCtx(lark.visitors.Interpreter):
         
         val_node = self.visit(tree.children[f])
 
+        resolved_type = None
         if type_sym != None:
+            resolved_type = type_sym.type
             # check types for compatibility
-            if not val_node.type.types_compatible(type_sym.type):
+            if not val_node.type.types_compatible(resolved_type):
                 # TODO: Error reporting
                 raise ValueError(f"Variable type {type_sym.name} is not compatible with value of type {val_node.type.render()}")
             # TODO: Might be dangerous
-            val_node.type = type_sym.type # coerce the value type for now
+            val_node.type = resolved_type # coerce the value type for now
         else:
             # infer type from value
-            # TODO: Instantiate types, for now only literals
-            assert val_node.type.kind in literal_types
-            type_sym = val_node.type.instantiate_literal(self.graph)
+            # TODO: Instantiate types, for now only literals            
+            if val_node.type.kind in builtin_userspace_types:
+                resolved_type = val_node.type
+            else:
+                assert val_node.type.kind in literal_types
+                resolved_type = val_node.type.instantiate_literal(self.graph)
 
         f += 1
         assert len(tree.children) == f
 
+        sym = self.current_scope.put_let(ident, mutable=is_mut)
+        sym.type = resolved_type
         return NodeLet(
             sym=sym,
-            type_sym=type_sym,
             expr=val_node
         )
 
