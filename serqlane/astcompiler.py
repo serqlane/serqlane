@@ -87,7 +87,7 @@ class NodeAssignment(Node):
         self.rhs = rhs
 
     def render(self) -> str:
-        return f"{self.lhs.render()} = {self.rhs.render()}"
+        return f"{self.lhs.render()} = {self.rhs.render()};"
 
 
 class NodeGrouped(Node):
@@ -187,6 +187,20 @@ class NodeWhileStmt(Node):
         cond = self.cond_expr.render()
         body = self.body.render()
         return f"while ({cond}) {body}"
+
+class NodeIfStmt(Node):
+    def __init__(self, cond_expr: Node, if_body: NodeBlockStmt, else_body: NodeBlockStmt) -> None:
+        super().__init__(None)
+        self.cond_expr = cond_expr
+        self.if_body = if_body
+        self.else_body = else_body
+
+    def render(self) -> str:
+        cond = self.cond_expr.render()
+        if_body = self.if_body.render()
+        else_body = self.else_body.render()
+        return f"if ({cond}) {if_body} else {else_body}"
+        
 
 class Symbol:
     def __init__(self, name: str, type: Type | None = None, exported: bool = False, mutable: bool = False) -> None:
@@ -507,6 +521,24 @@ class CompCtx(lark.visitors.Interpreter):
         assert isinstance(body, NodeBlockStmt)
 
         return NodeWhileStmt(while_cond, body)
+
+    def if_stmt(self, tree: Tree, expected_type: Type):
+        assert expected_type == None
+        # Same scoping story as in while_stmt
+        if_cond = self.visit(tree.children[0], self.current_scope.lookup_type("bool", shallow=True))
+        assert if_cond.type.kind == TypeKind.bool
+        if_body = self.visit(tree.children[1], None)
+        assert isinstance(if_body, NodeBlockStmt)
+
+        else_body = None
+        if tree.children[2] != None:
+            else_body = self.visit(tree.children[2], None)
+            assert isinstance(else_body, NodeBlockStmt)
+        else:
+            # Always inject an empty else case if none is provided
+            else_body = NodeBlockStmt(self.current_scope.make_child())
+        return NodeIfStmt(if_cond, if_body, else_body)
+
 
     def block_stmt(self, tree: Tree, expected_type: Type):
         assert expected_type == None
