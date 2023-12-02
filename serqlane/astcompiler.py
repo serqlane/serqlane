@@ -26,7 +26,7 @@ class NodeSymbol(Node):
 
     def render(self) -> str:
         # TODO: Unique global identifier later
-        return f"{self.symbol.name}"
+        return f"{self.symbol.render()}"
 
 class NodeStmtList(Node):
     def __init__(self) -> None:
