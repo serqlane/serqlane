@@ -876,11 +876,15 @@ class CompCtx(lark.visitors.Interpreter):
 
         # must open a scope here to isolate the params
         fn_scope = self.current_scope.make_child()
+        self.current_scope = fn_scope
         
         args_node = self.visit(tree.children[1], None)
         assert isinstance(args_node, NodeFnParameters)
         ret_type_node = self.visit(tree.children[2], None)
         assert isinstance(ret_type_node, NodeSymbol)
+
+        # The sym must be created here to make recursive calls work without polluting the arg scope
+        sym = self.current_scope.parent.put(ident)
 
         # TODO: Make this work for generics later
         self.fn_ret_type_stack.append(ret_type_node.type)
@@ -900,7 +904,6 @@ class CompCtx(lark.visitors.Interpreter):
         # restore scope
         self.current_scope = fn_scope.parent
 
-        sym = self.current_scope.put(ident)
         sym.type = fn_type
 
         res = NodeFnDefinition(sym, args_node, body_node)
