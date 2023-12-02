@@ -83,6 +83,38 @@ class SerqVM:
             case NodeGrouped():
                 return self.eval(expression.inner)
 
+            case NodeFnCall():
+                stack = self.stack.copy()
+
+                self.enter_scope()
+
+                print("fn call")
+                print(f"{expression.callee.symbol.name=}")
+
+                if expression.callee.symbol.name == "dbg":
+                    val = self.eval(expression.args[0])
+                    print(f"DBG: {val}")
+                    return None
+                else:
+                    # TODO: Change these lines once function pointers exist
+                    assert isinstance(expression.callee, NodeSymbol)
+                    fn_def: NodeFnDefinition = expression.callee.symbol.definition_node
+                    for i in range(0, len(expression.args)):
+                        val = self.eval(expression.args[i])
+                        sym = fn_def.params.args[i][0].symbol
+                        self.push_value_on_stack(sym, val)
+
+                    self.execute_node(fn_def.body)
+
+                    ret_val = self.stack[-1][None]
+                    self.exit_scope() # exit return scope
+
+                    self.exit_scope() # exit function scope
+
+                    self.stack = stack
+                    return ret_val
+            case NodeEmpty():
+                pass
             case _:
                 raise NotImplementedError(f"{expression=}")
 
@@ -157,10 +189,21 @@ class SerqVM:
                     else:
                         self.execute_node(child.else_body)
 
+                case NodeFnDefinition():
+                    pass # nop
+
+                case NodeFnCall():
+                    self.eval(child)
+
+                case NodeReturn():
+                    val = self.eval(child.expr)
+                    self.enter_scope()
+                    self.push_value_on_stack(None, val)
+
                 case _:
                     raise NotImplementedError(f"{child=}")
 
-            print(f"{self.stack=}")
+            #print(f"{self.stack=}")
 
     def execute_module(self, module: Module):
         start = module.ast
@@ -173,15 +216,18 @@ class SerqVM:
 
 if __name__ == "__main__":
     code = """
-let mut x = 0;
-while true {
-  x = x + 1;
+let mut i = 0;
+while i < 10 {
+    i = i + 1;
+    if i == 2 {
+        dbg("reached 2");
+    }
 }
 """
 
     graph = ModuleGraph()
     module = graph.load("<string>", code)
-    print(module.ast.render())
+    #print(module.ast.render())
 
     vm = SerqVM()
     vm.execute_module(module)

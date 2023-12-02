@@ -19,6 +19,14 @@ class Node:
     def render(self) -> str:
         raise NotImplementedError(f"{type(self)}")
 
+class NodeEmpty(Node):
+    def __init__(self, type: Type) -> None:
+        assert type.kind == TypeKind.unit, "An empty node must have a unit type"
+        super().__init__(type)
+
+    def render(self) -> str:
+        return ""
+
 class NodeSymbol(Node):
     def __init__(self, symbol: Symbol, type: Type | None = None) -> None:
         super().__init__(type)
@@ -270,6 +278,9 @@ class Symbol:
         self.mutable = mutable
         self.definition_node: Node = None
 
+    def __repr__(self) -> str:
+        return self.render()
+
     def render(self) -> str:
         # TODO: Use type info to render generics and others
         return f"{self.name}_{self.id}"
@@ -278,7 +289,8 @@ class Symbol:
 class TypeKind(Enum):
     error = auto() # bad type
     infer = auto() # marker type to let nodes know to infer their own types
-    
+    magic = auto() # TODO: Get rid of later. Exists to make compiler magics work for debugging
+ 
     # literal types, haven't yet been matched
     literal_int = auto()
     literal_float = auto()
@@ -355,7 +367,7 @@ logical_types = frozenset([
 
 
 # TODO: Add the other appropriate types
-builtin_userspace_types = frozenset(list(int_types) + list(float_types) + [TypeKind.bool, TypeKind.char, TypeKind.string])
+builtin_userspace_types = frozenset(list(int_types) + list(float_types) + [TypeKind.bool, TypeKind.char, TypeKind.string, TypeKind.unit])
 
 class Type:
     def __init__(self, kind: TypeKind, sym: Symbol, data: Any = None) -> None:
@@ -372,6 +384,9 @@ class Type:
         if self.kind == TypeKind.infer or other.kind == TypeKind.infer:
             return True
 
+        if self.kind == TypeKind.magic or other.kind == TypeKind.magic:
+            return True
+
         # TODO: Match variant, like generic inst of generic type
         match self.kind:
             case TypeKind.error:
@@ -379,7 +394,7 @@ class Type:
             
             # TODO: Not sure what to do about these
             case TypeKind.unit:
-                raise ValueError("units aren't ready yet")
+                return self.kind == other.kind
             
             case TypeKind.function:
                 raise NotImplementedError() # TODO
@@ -814,6 +829,8 @@ class CompCtx(lark.visitors.Interpreter):
         
         val_node_expected_type = type_sym.type if type_sym != None else self.get_infer_type()
         val_node = self.visit(tree.children[f], val_node_expected_type)
+        if val_node.type.kind == TypeKind.unit:
+            raise ValueError(f"Type `{val_node.type.kind.name}` is not valid for `let`")
 
         resolved_type = None
         if type_sym != None:
@@ -849,7 +866,13 @@ class CompCtx(lark.visitors.Interpreter):
         assert expected_type == None
         assert len(self.fn_ret_type_stack) > 0, "Return outside of a function"
         # TODO: Make sure this passes type checks
-        return NodeReturn(expr=self.visit(tree.children[0], self.fn_ret_type_stack[-1]))
+        expr = None
+        if tree.children[0] != None:
+            expr = self.visit(tree.children[0], self.fn_ret_type_stack[-1])
+        else:
+            expr = NodeEmpty(self.fn_ret_type_stack[-1])
+        assert self.fn_ret_type_stack[-1].types_compatible(expr.type), f"Incompatible return({expr.type.render()}) for function type({self.fn_ret_type_stack[-1].render()})"
+        return NodeReturn(expr=expr)
 
     def fn_definition_args(self, tree: Tree, expected_type: Type):
         assert expected_type == None
@@ -862,7 +885,7 @@ class CompCtx(lark.visitors.Interpreter):
             sym = self.current_scope.put_let(ident) # effectively a let
             type_node = self.visit(child.children[1], None)
             sym.type = type_node.symbol.type # TODO: This is not clean at all
-            params.append((sym, type_node))
+            params.append((NodeSymbol(sym, sym.type), type_node))
 
         return NodeFnParameters(params)
 
@@ -880,14 +903,20 @@ class CompCtx(lark.visitors.Interpreter):
         
         args_node = self.visit(tree.children[1], None)
         assert isinstance(args_node, NodeFnParameters)
-        ret_type_node = self.visit(tree.children[2], None)
-        assert isinstance(ret_type_node, NodeSymbol)
+        ret_type_node = None
+        ret_type = None
+        if tree.children[2] != None:
+            ret_type_node = self.visit(tree.children[2], None)
+            assert isinstance(ret_type_node, NodeSymbol)
+            ret_type = ret_type_node.type # TODO: Fix this nonsense, type should be `type`, not whatever the type evaluates to
+        else:
+            ret_type = self.current_scope.lookup_type("unit", shallow=True)
 
         # The sym must be created here to make recursive calls work without polluting the arg scope
         sym = self.current_scope.parent.put(ident)
 
         # TODO: Make this work for generics later
-        self.fn_ret_type_stack.append(ret_type_node.type)
+        self.fn_ret_type_stack.append(ret_type)
 
         # TODO: Use a type cache to load function with the same type from it for easier matching
         fn_type = Type(
@@ -915,7 +944,12 @@ class CompCtx(lark.visitors.Interpreter):
         callee = self.visit(tree.children[0], None)
         arg_types = callee.symbol.type.data[0]
         ret_type_node = callee.symbol.type.data[1]
-        assert isinstance(ret_type_node, NodeSymbol)
+        ret_type = None
+        if ret_type_node != None:
+            assert isinstance(ret_type_node, NodeSymbol), f"{ret_type_node=}"
+            ret_type = ret_type_node.type # TODO: Fix garbage type, should be a `type`, not evaluated type
+        else:
+            ret_type = self.current_scope.lookup_type("unit", shallow=True)
 
         params = []
         if tree.children[1] != None:
@@ -928,7 +962,7 @@ class CompCtx(lark.visitors.Interpreter):
         return NodeFnCall(
             callee=callee,
             args=params,
-            type=ret_type_node.symbol.type
+            type=ret_type
         )
 
     def expression(self, tree: Tree, expected_type: Type):
@@ -989,6 +1023,8 @@ class ModuleGraph:
         # TODO: Use a type cache instead of scope hack
         self.builtin_scope = Scope(self)
 
+        self.builtin_scope.put_builtin_type(TypeKind.unit)
+
         self.builtin_scope.put_builtin_type(TypeKind.bool)
         self.builtin_scope.put_builtin_type(TypeKind.char)
 
@@ -1020,6 +1056,15 @@ class ModuleGraph:
         self.builtin_scope.put_builtin_type(TypeKind.string)
         self.builtin_scope.put_builtin_type(TypeKind.array)
         self.builtin_scope.put_builtin_type(TypeKind.static)
+
+
+        # TODO: hack
+        magic_sym = Symbol("-1", "magic")
+        magic_type = Type(TypeKind.magic, magic_sym)
+        magic_sym.type = magic_type
+
+        dbg_sym = self.builtin_scope.put("dbg")
+        dbg_sym.type = Type(TypeKind.function, dbg_sym, ([magic_type], NodeSymbol(self.builtin_scope.lookup_type("unit"))))
 
 
     def load(self, name: str, file_contents: str) -> Module:
