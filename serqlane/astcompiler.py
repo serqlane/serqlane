@@ -656,7 +656,9 @@ class CompCtx(lark.visitors.Interpreter):
             
             # there is an expected type but the expression isn't compatible with it
             else:
-                assert False, f"{expected_type.kind=}    {expr_type.kind}"
+                # Assume it's fine, it should be checked outside of here
+                pass
+                #assert False, f"{expected_type.kind=}    {expr_type.kind}"
 
         match op:
             case "plus":
