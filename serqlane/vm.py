@@ -140,10 +140,8 @@ if __name__ == "__main__":
     code = """
 let mut i = 1;
 {
-    i = i + (1 / i);
-    i = i / i;
+    i = i + i;
 }
-i = i * i * 2;
 """
 
     graph = ModuleGraph()
