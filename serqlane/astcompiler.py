@@ -177,6 +177,17 @@ class NodeBlockStmt(NodeStmtList):
         inner = super().render()
         return f"{{\n{textwrap.indent(inner, "  ")}\n}}"
 
+class NodeWhileStmt(Node):
+    def __init__(self, cond_expr: Node, body: NodeBlockStmt) -> None:
+        super().__init__(None)
+        self.cond_expr = cond_expr
+        self.body = body
+    
+    def render(self) -> str:
+        cond = self.cond_expr.render()
+        body = self.body.render()
+        return f"while ({cond}) {body}"
+
 class Symbol:
     def __init__(self, name: str, type: Type | None = None, exported: bool = False, mutable: bool = False) -> None:
         # TODO: Should store the source node, symbol kinds, sym id
@@ -485,6 +496,17 @@ class CompCtx(lark.visitors.Interpreter):
         return self.visit(tree.children[0], expected_type)
 
 
+    def while_stmt(self, tree: Tree, expected_type: Type):
+        assert expected_type == None
+        # This has to use the outer scope, so a new scope is only opened once this has been checked in full
+        while_cond = self.visit(tree.children[0], self.current_scope.lookup_type("bool", shallow=True))
+        assert while_cond.type.kind == TypeKind.bool
+
+        # block_stmt opens a scope
+        body = self.visit(tree.children[1], None)
+        assert isinstance(body, NodeBlockStmt)
+
+        return NodeWhileStmt(while_cond, body)
 
     def block_stmt(self, tree: Tree, expected_type: Type):
         assert expected_type == None
