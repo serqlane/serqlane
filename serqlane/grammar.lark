@@ -18,9 +18,6 @@ return_stmt: "return" expression
 break_stmt: "break"
 continue_stmt: "continue"
 
-break_stmt: "break"
-continue_stmt: "continue"
-
 block_stmt: _block
 _block: "{" statement* "}" // TODO: There is no such thing as a block expression right now
 
