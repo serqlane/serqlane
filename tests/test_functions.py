@@ -5,7 +5,7 @@ import pytest
 return_tests = [
     (
         """
-fn add(a: int, b: int): int {
+fn add(a: int, b: int) -> int {
     return a + b
 }
 
@@ -16,7 +16,7 @@ dbg(x)
     ),
     (
         """
-fn add(a: int, b: int): int {
+fn add(a: int, b: int) -> int {
     a + b
 }
 
@@ -32,7 +32,7 @@ def test_variable_shadowing(capture_first_debug):
     code = """
 let x = 1
 
-fn foo(x: int): int {
+fn foo(x: int) -> int {
     return x
 }
 
@@ -50,7 +50,7 @@ def test_return(capture_first_debug, code, expected):
 
 def test_recusive_function(capture_first_debug):
     code = """
-fn add_one(x: int): int {
+fn add_one(x: int) -> int {
     if x == 1 {
         // should give us 4
         return add_one(x + 1) + 1
