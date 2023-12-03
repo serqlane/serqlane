@@ -268,16 +268,10 @@ class SerqVM:
 
 if __name__ == "__main__":
     code = """
-fn add_one(x: int): int {
-    if x == 1 {
-        // should give us 4
-        return add_one(x + 1) + 1
-    }
-    return x + 1
+let x = {
+    1 + 1
 }
-
-let w = add_one(2)
-dbg(w)
+dbg(x)
 """
 
     import socket
@@ -288,7 +282,7 @@ dbg(w)
 
     graph = ModuleGraph()
     module = graph.load("<string>", code)
-    # print(module.ast.render())
+    print(module.ast.render())
 
     vm = SerqVM()
     vm.execute_module(module)
