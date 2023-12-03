@@ -13,7 +13,8 @@ from serqlane.parser import SerqParser
 
 
 class Node:
-    def __init__(self, type: Type | None = None) -> None:
+    def __init__(self, type: Type) -> None:
+        assert type != None and isinstance(type, Type)
         self.type = type
 
     def render(self) -> str:
@@ -28,7 +29,7 @@ class NodeEmpty(Node):
         return ""
 
 class NodeSymbol(Node):
-    def __init__(self, symbol: Symbol, type: Type | None = None) -> None:
+    def __init__(self, symbol: Symbol, type: Type) -> None:
         super().__init__(type)
         self.symbol = symbol
 
@@ -37,8 +38,8 @@ class NodeSymbol(Node):
         return f"{self.symbol.render()}"
 
 class NodeStmtList(Node):
-    def __init__(self) -> None:
-        super().__init__()
+    def __init__(self, type: Type) -> None:
+        super().__init__(type)
         self.children: list[Node] = []
 
     def add(self, node: Node):
@@ -71,8 +72,8 @@ class NodeStringLit(NodeLiteral[str]):
         return f"\"{self.value}\""
 
 class NodeLet(Node):
-    def __init__(self, sym_node: NodeSymbol, expr: Node):
-        super().__init__()
+    def __init__(self, sym_node: NodeSymbol, expr: Node, type: Type):
+        super().__init__(type)
         self.sym_node = sym_node
         self.expr = expr
 
@@ -81,8 +82,8 @@ class NodeLet(Node):
         return f"let {"mut " if is_mut else ""}{self.sym_node.render()}{": " + self.sym_node.type.render()} = {self.expr.render()};"
 
 class NodeAssignment(Node):
-    def __init__(self, lhs: Node, rhs: Node) -> None:
-        super().__init__(None)
+    def __init__(self, lhs: Node, rhs: Node, type: Type) -> None:
+        super().__init__(type)
         self.lhs = lhs
         self.rhs = rhs
 
@@ -169,23 +170,17 @@ class NodeGreaterEqualsExpression(NodeBinaryExpr):
 
 # others
 class NodeBreak(Node):
-    def __init__(self) -> None:
-        super().__init__(None)
-
     def render(self) -> str:
         return "break;"
 
 class NodeContinue(Node):
-    def __init__(self) -> None:
-        super().__init__(None)
-
     def render(self) -> str:
         return "continue;"
 
 
 class NodeBlockStmt(NodeStmtList):
-    def __init__(self, scope: Scope) -> None:
-        super().__init__()
+    def __init__(self, scope: Scope, type: Type) -> None:
+        super().__init__(type)
         self.scope = scope # TODO: Should this actually be stored?
 
     def render(self) -> str:
@@ -193,8 +188,8 @@ class NodeBlockStmt(NodeStmtList):
         return f"{{\n{textwrap.indent(inner, "  ")}\n}}"
 
 class NodeWhileStmt(Node):
-    def __init__(self, cond_expr: Node, body: NodeBlockStmt) -> None:
-        super().__init__(None)
+    def __init__(self, cond_expr: Node, body: NodeBlockStmt, type: Type) -> None:
+        super().__init__(type)
         self.cond_expr = cond_expr
         self.body = body
     
@@ -204,8 +199,8 @@ class NodeWhileStmt(Node):
         return f"while ({cond}) {body}"
 
 class NodeIfStmt(Node):
-    def __init__(self, cond_expr: Node, if_body: NodeBlockStmt, else_body: NodeBlockStmt) -> None:
-        super().__init__(None)
+    def __init__(self, cond_expr: Node, if_body: NodeBlockStmt, else_body: NodeBlockStmt, type: Type) -> None:
+        super().__init__(type)
         self.cond_expr = cond_expr
         self.if_body = if_body
         self.else_body = else_body
@@ -218,8 +213,8 @@ class NodeIfStmt(Node):
 
 
 class NodeReturn(Node):
-    def __init__(self, expr: Node) -> None:
-        super().__init__(None)
+    def __init__(self, expr: Node, type: Type) -> None:
+        super().__init__(type)
         self.expr = expr
 
     def render(self) -> str:
@@ -237,8 +232,8 @@ class NodeFnParameters(Node):
         return ", ".join([x[0].render() + ": " + x[1].type.render() for x in self.args])
 
 class NodeFnDefinition(Node):
-    def __init__(self, sym: Symbol, params: NodeFnParameters, body: NodeBlockStmt) -> None:
-        super().__init__(None)
+    def __init__(self, sym: Symbol, params: NodeFnParameters, body: NodeBlockStmt, type: Type) -> None:
+        super().__init__(type)
         assert sym.type.kind == TypeKind.function
         self.sym = sym # holds all of the actual type info
         self.sym.definition_node = self # store a reference to self so we can resolve named args
@@ -249,7 +244,7 @@ class NodeFnDefinition(Node):
         return f"fn {self.sym.render()}({self.params.render()}): {self.sym.type.data[1].symbol.type.render()} {self.body.render()}"
 
 class NodeFnCall(Node):
-    def __init__(self, callee: Node, args: list[Node], type: Type | None = None) -> None:
+    def __init__(self, callee: Node, args: list[Node], type: Type) -> None:
         super().__init__(type)
         self.callee = callee
         self.args = args
@@ -269,7 +264,7 @@ class SymbolKind(Enum):
 
 
 class Symbol:
-    def __init__(self, id: str, name: str, type: Type | None = None, mutable: bool = False) -> None:
+    def __init__(self, id: str, name: str, type: Type = None, mutable: bool = False) -> None:
         # TODO: Should store the source node, symbol kinds
         self.id = id
         self.name = name
@@ -593,14 +588,14 @@ class CompCtx(lark.visitors.Interpreter):
 
 
     def handle_break_or_continue(self, tree: Tree, expected_type: Type):
-        assert expected_type == None
+        assert expected_type.kind == TypeKind.unit
         assert len(tree.children) == 0
         if self.in_loop_counter < 1:
             raise ValueError("Break or continue outside of a loop")
         if tree.data == "break_stmt":
-            return NodeBreak()
+            return NodeBreak(self.get_unit_type())
         elif tree.data == "continue_stmt":
-            return NodeContinue()
+            return NodeContinue(self.get_unit_type())
         else:
             raise ValueError(f"Somehow a bad break or continue has been given: {tree.data}")
         
@@ -613,58 +608,65 @@ class CompCtx(lark.visitors.Interpreter):
 
 
     def while_stmt(self, tree: Tree, expected_type: Type):
-        assert expected_type == None
+        assert expected_type.kind == TypeKind.unit
         # This has to use the outer scope, so a new scope is only opened once this has been checked in full
         while_cond = self.visit(tree.children[0], self.current_scope.lookup_type("bool", shallow=True))
         assert while_cond.type.kind == TypeKind.bool
 
         # block_stmt opens a scope
         self.in_loop_counter += 1 # needed to check if break and continue are valid
-        body = self.visit(tree.children[1], None)
+        body = self.visit(tree.children[1], self.get_unit_type())
         self.in_loop_counter -= 1
         assert isinstance(body, NodeBlockStmt)
 
-        return NodeWhileStmt(while_cond, body)
+        return NodeWhileStmt(while_cond, body, self.get_unit_type())
 
     def if_stmt(self, tree: Tree, expected_type: Type):
-        assert expected_type == None
+        assert expected_type.kind == TypeKind.unit # TODO: if expressions are not unit, need to guarantee valid else branch
         # Same scoping story as in while_stmt
         if_cond = self.visit(tree.children[0], self.current_scope.lookup_type("bool", shallow=True))
         assert if_cond.type.kind == TypeKind.bool
-        if_body = self.visit(tree.children[1], None)
+        if_body = self.visit(tree.children[1], self.get_unit_type())
         assert isinstance(if_body, NodeBlockStmt)
 
         else_body = None
         if tree.children[2] != None:
-            else_body = self.visit(tree.children[2], None)
+            else_body = self.visit(tree.children[2], self.get_unit_type())
             assert isinstance(else_body, NodeBlockStmt)
         else:
             # Always inject an empty else case if none is provided
-            else_body = NodeBlockStmt(self.current_scope.make_child())
-        return NodeIfStmt(if_cond, if_body, else_body)
+            else_body = NodeBlockStmt(self.current_scope.make_child(), self.get_unit_type())
+        return NodeIfStmt(if_cond, if_body, else_body, self.get_unit_type()) # TODO: Pass along branch types once they exist
 
 
-    def block_stmt(self, tree: Tree, expected_type: Type):
+    def block_stmt(self, tree: Tree, expected_type: Type, expression_mode=False):
         self.current_scope = self.current_scope.make_child()
-        result = NodeBlockStmt(self.current_scope)
+        if len(tree.children) == 0:
+            assert expected_type == None or expected_type.kind == TypeKind.unit
+            return NodeBlockStmt(self.current_scope, self.get_unit_type())
+
+        # Assume unit type if nothing is expected, fixed later
         # Have to be very careful with symbols, we do not want to use one that only exists later
-        for child in tree.children:
-            result.add(self.visit(child, None))
+        result = NodeBlockStmt(self.current_scope, expected_type if expected_type != None else self.get_unit_type())
+
+        (tree_children, last_child) = (tree.children[0:len(tree.children)-1], tree.children[-1])
+        for child in tree_children:
+            # All but the last have to be unit typed
+            result.add(self.visit(child, self.get_unit_type()))
+
         if expected_type != None:
-            assert len(result.children) > 0
-            result.children[-1] = self.visit(tree.children[-1], expected_type)
+            result.add(self.visit(last_child, expected_type))
             assert expected_type.types_compatible(result.children[-1].type), f"Expected type {expected_type.render()} for block but got {result.children[-1].type.render()}"
             result.type = result.children[-1].type
         elif len(result.children) > 0:
-            # Lack of expected type means we have to ensure this is unit
-            assert result.children[-1].type == None or result.children[-1].type.kind == expected_type, "A block expression that isn't assigned to anything must be of type unit"
+            result.add(self.visit(last_child, None))
             result.type = result.children[-1].type
 
         self.current_scope = self.current_scope.parent
         return result
     
     def block_expression(self, tree: Tree, expected_type: Type):
-        return self.block_stmt(tree, expected_type)
+        return self.block_stmt(tree, expected_type, expression_mode=True)
 
     def grouped_expression(self, tree: Tree, expected_type: Type):
         inner = self.visit(tree.children[0], expected_type)
@@ -804,7 +806,7 @@ class CompCtx(lark.visitors.Interpreter):
 
     def assignment(self, tree: Tree, expected_type: Type):
         # TODO: Assignments could technically act as expressions too
-        assert expected_type == None
+        assert expected_type.kind == TypeKind.unit
 
         lhs = self.visit(tree.children[0], None)
         rhs = self.visit(tree.children[1], lhs.type)
@@ -817,7 +819,7 @@ class CompCtx(lark.visitors.Interpreter):
             case _:
                 raise NotImplementedError
         
-        return NodeAssignment(lhs, rhs)
+        return NodeAssignment(lhs, rhs, self.get_unit_type())
 
     def let_stmt(self, tree: Tree, expected_type: Type):
         mut_node = tree.children[0]
@@ -876,7 +878,8 @@ class CompCtx(lark.visitors.Interpreter):
         sym = NodeSymbol(sym, sym.type)
         return NodeLet(
             sym_node=sym,
-            expr=val_node
+            expr=val_node,
+            type=self.get_unit_type()
         )
 
     def return_stmt(self, tree: Tree, expected_type: Type):
@@ -888,10 +891,10 @@ class CompCtx(lark.visitors.Interpreter):
         else:
             expr = NodeEmpty(self.fn_ret_type_stack[-1])        
         assert self.fn_ret_type_stack[-1].types_compatible(expr.type), f"Incompatible return({expr.type.render()}) for function type({self.fn_ret_type_stack[-1].render()})"
-        return NodeReturn(expr=expr)
+        return NodeReturn(expr=expr, type=self.get_unit_type())
 
     def fn_definition_args(self, tree: Tree, expected_type: Type):
-        assert expected_type == None
+        assert expected_type.kind == TypeKind.unit
 
         params = []
         for child in tree.children:
@@ -906,7 +909,7 @@ class CompCtx(lark.visitors.Interpreter):
         return NodeFnParameters(params)
 
     def fn_definition(self, tree: Tree, expected_type: Type):
-        assert expected_type == None
+        assert expected_type.kind == TypeKind.unit
 
         ident_node = tree.children[0]
         assert ident_node.data == "identifier"
@@ -917,7 +920,7 @@ class CompCtx(lark.visitors.Interpreter):
         fn_scope = self.current_scope.make_child()
         self.current_scope = fn_scope
         
-        args_node = self.visit(tree.children[1], None)
+        args_node = self.visit(tree.children[1], self.get_unit_type())
         assert isinstance(args_node, NodeFnParameters)
         ret_type_node = None
         ret_type = None
@@ -949,7 +952,7 @@ class CompCtx(lark.visitors.Interpreter):
         # TODO: Simplify checks, we can rely on the fact that it has to be transformed into `return x`
         if len(body_node.children) > 0:
             last_body_node = body_node.children[-1]
-            if (last_body_node.type == None or last_body_node.type.kind == TypeKind.unit) and not isinstance(last_body_node, NodeReturn):
+            if last_body_node.type.kind == TypeKind.unit and not isinstance(last_body_node, NodeReturn):
                 assert False, f"Returning a unit type for expected type {ret_type.render()} is not permitted"
             elif isinstance(last_body_node, NodeReturn):
                 pass # return is already checked
@@ -958,10 +961,10 @@ class CompCtx(lark.visitors.Interpreter):
                 last_body_node = body_node.children[-1]
                 if last_body_node.type.kind in builtin_userspace_types:
                     assert last_body_node.type.types_compatible(ret_type), f"Invalid return expression type {last_body_node.type.render()} for return type {ret_type.render()}"
-                body_node.children[-1] = NodeReturn(last_body_node)
+                body_node.children[-1] = NodeReturn(last_body_node, self.get_unit_type())
             else:
                 assert last_body_node.type.types_compatible(ret_type), f"Invalid return expression type {last_body_node.type.render()} for return type {ret_type.render()}"
-                body_node.children[-1] = NodeReturn(last_body_node)
+                body_node.children[-1] = NodeReturn(last_body_node, self.get_unit_type())
         else:
             body_node.children.append(NodeReturn(NodeEmpty(self.get_unit_type())))
 
@@ -972,7 +975,7 @@ class CompCtx(lark.visitors.Interpreter):
 
         sym.type = fn_type
 
-        res = NodeFnDefinition(sym, args_node, body_node)
+        res = NodeFnDefinition(sym, args_node, body_node, self.get_unit_type())
         sym.definition_node = res
         return res
 
@@ -1015,9 +1018,9 @@ class CompCtx(lark.visitors.Interpreter):
             assert False
 
     def start(self, tree: Tree, expected_type: Type):
-        result = NodeStmtList()
+        result = NodeStmtList(self.current_scope.lookup_type("unit", shallow=True))
         for child in tree.children:
-            node = self.visit(child, None) # TODO: Force None for now
+            node = self.visit(child, self.get_unit_type())
             assert isinstance(node, Node)
             result.add(node)
         return result
@@ -1060,7 +1063,7 @@ class ModuleGraph:
         # TODO: Use a type cache instead of scope hack
         self.builtin_scope = Scope(self)
 
-        self.builtin_scope.put_builtin_type(TypeKind.unit)
+        unit_type_sym = self.builtin_scope.put_builtin_type(TypeKind.unit)
 
         self.builtin_scope.put_builtin_type(TypeKind.bool)
         self.builtin_scope.put_builtin_type(TypeKind.char)
@@ -1101,7 +1104,7 @@ class ModuleGraph:
         magic_sym.type = magic_type
 
         dbg_sym = self.builtin_scope.put("dbg")
-        dbg_sym.type = Type(TypeKind.function, dbg_sym, ([magic_type], NodeSymbol(self.builtin_scope.lookup_type("unit"))))
+        dbg_sym.type = Type(TypeKind.function, dbg_sym, ([magic_type], NodeSymbol(unit_type_sym, unit_type_sym.type)))
 
 
     def load(self, name: str, file_contents: str) -> Module:
