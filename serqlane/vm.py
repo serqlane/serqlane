@@ -48,6 +48,9 @@ class Register:
         self._set = True
 
 
+class Unit: ...
+
+
 class SerqVM:
     def __init__(self) -> None:
         self.stack: list[dict[Symbol, Any]] = []
@@ -125,8 +128,7 @@ class SerqVM:
                 if expression.callee.symbol.name == "dbg": # type: ignore (olaf code)
                     val = self.eval(expression.args[0])
                     print(f"DBG: {val}")
-                    # TODO: replace with Unit
-                    return None
+                    return Unit()
                 else:
                     stack = self.stack.copy()
                     self.enter_scope()
@@ -139,20 +141,25 @@ class SerqVM:
                         sym = fn_def.params.args[i][0].symbol
                         self.push_value_on_stack(sym, val)
 
-                    return_value = None
-
                     try:
-                        self.execute_node(fn_def.body)
+                        return_value = self.execute_node(fn_def.body)
                     except ReturnError:
                         if self.return_register.is_set():
                             return_value = self.return_register.get_value()
+                        else:
+                            return_value = Unit()
+                    else:
+                        if return_value is None:
+                            return_value = Unit()
 
                     self.exit_scope()  # exit function scope
 
                     self.stack = stack
                     return return_value
+
             case NodeEmpty():
                 pass
+
             case _:
                 raise NotImplementedError(f"{expression=}")
 
@@ -196,8 +203,9 @@ class SerqVM:
 
                 case NodeBlockStmt():
                     self.enter_scope()
-                    self.execute_node(child)
+                    return_value = self.execute_node(child)
                     self.exit_scope()
+                    return return_value
 
                 case NodeWhileStmt():
                     stack = None
@@ -237,7 +245,14 @@ class SerqVM:
                     value = self.eval(child.expr)
                     self.return_register.set_value(value)
                     raise ReturnError()
+
                 case _:
+                    # assume expression
+                    try:
+                        return self.eval(child)
+                    except NotImplementedError:
+                        pass
+
                     raise NotImplementedError(f"{child=}")
 
             print(f"{self.stack=}")
@@ -254,7 +269,7 @@ class SerqVM:
 if __name__ == "__main__":
     code = """
 fn add(a: int, b: int): int {
-    return a + b
+    a + b
 }
 
 let x = add(1, 1)
