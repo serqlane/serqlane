@@ -657,7 +657,7 @@ class CompCtx(lark.visitors.Interpreter):
             result.type = result.children[-1].type
         elif len(result.children) > 0:
             # Lack of expected type means we have to ensure this is unit
-            assert result.children[-1].type.kind == TypeKind.unit, "A block expression that isn't assigned to anything must be of type unit"
+            assert result.children[-1].type == None or result.children[-1].type.kind == expected_type, "A block expression that isn't assigned to anything must be of type unit"
             result.type = result.children[-1].type
 
         self.current_scope = self.current_scope.parent
@@ -880,14 +880,13 @@ class CompCtx(lark.visitors.Interpreter):
         )
 
     def return_stmt(self, tree: Tree, expected_type: Type):
-        assert expected_type == None
         assert len(self.fn_ret_type_stack) > 0, "Return outside of a function"
         # TODO: Make sure this passes type checks
         expr = None
         if tree.children[0] != None:
             expr = self.visit(tree.children[0], self.fn_ret_type_stack[-1])
         else:
-            expr = NodeEmpty(self.fn_ret_type_stack[-1])
+            expr = NodeEmpty(self.fn_ret_type_stack[-1])        
         assert self.fn_ret_type_stack[-1].types_compatible(expr.type), f"Incompatible return({expr.type.render()}) for function type({self.fn_ret_type_stack[-1].render()})"
         return NodeReturn(expr=expr)
 
@@ -944,8 +943,9 @@ class CompCtx(lark.visitors.Interpreter):
         # TODO: Make this work for generics later
         self.fn_ret_type_stack.append(ret_type)
 
-
-        body_node: NodeBlockStmt = self.visit(tree.children[3], None) # TODO: once block expressions work, this should expect the return type
+        print("PUTTING RET TYPE")
+        print(ret_type.kind)
+        body_node: NodeBlockStmt = self.visit(tree.children[3], self.get_infer_type()) # TODO: once block expressions work, this should expect the return type
         assert isinstance(body_node, NodeBlockStmt)
 
         # TODO: Simplify checks, we can rely on the fact that it has to be transformed into `return x`
