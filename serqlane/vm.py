@@ -200,6 +200,7 @@ class SerqVM:
         raise KeyError(f"{symbol} not found in scope")
 
     def execute_node(self, line: NodeStmtList):
+        return_value = Unit()
         for child in line.children:
             match child:
                 case NodeLet():
@@ -215,7 +216,6 @@ class SerqVM:
                     self.enter_scope()
                     return_value = self.execute_node(child)
                     self.exit_scope()
-                    return return_value
 
                 case NodeWhileStmt():
                     stack = None
@@ -258,14 +258,11 @@ class SerqVM:
 
                 case _:
                     # assume expression
-                    try:
-                        return self.eval(child)
-                    except NotImplementedError:
-                        pass
-
-                    raise NotImplementedError(f"{child=}")
+                    return_value = self.eval(child)
 
             print(f"{self.stack=}")
+
+        return return_value
 
     def execute_module(self, module: Module):
         start = module.ast
@@ -279,14 +276,15 @@ class SerqVM:
 if __name__ == "__main__":
     code = """
 fn add_one(x: int): int {
+    if x == 1 {
+        // should give us 4
+        return add_one(x + 1) + 1
+    }
+
     x + 1
 }
 
-fn add_one_proxy(x: int): int {
-    add_one(x)
-}
-
-let w = add_one_proxy(1)
+let w = add_one(1)
 """
 
     logger.setLevel(logging.DEBUG)
