@@ -254,8 +254,6 @@ class SerqVM:
                     # assume expression
                     return_value = self.eval(child)
 
-            logger.debug(f"{self.stack=}")
-
         return return_value
 
     def execute_module(self, module: Module):
@@ -269,7 +267,11 @@ class SerqVM:
 
 if __name__ == "__main__":
     code = """
-dbg(1 * 2)
+fn add(a: int, b: int): string {
+    a + b
+}
+
+let x = add(1, 1)
 """
 
     import socket
