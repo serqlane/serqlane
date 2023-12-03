@@ -28,16 +28,19 @@ dbg(x)
 ]
 
 
-def test_variable_shadowing(executor):
-    executor(
-        """
+def test_variable_shadowing(capture_first_debug):
+    code = """
 let x = 1
 
 fn foo(x: int): int {
     return x
 }
+
+foo(20)
+dbg(x)
 """
-    )
+
+    assert capture_first_debug(code) == 1
 
 
 @pytest.mark.parametrize("code,expected", return_tests)
