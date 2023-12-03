@@ -79,7 +79,7 @@ class NodeLet(Node):
 
     def render(self) -> str:
         is_mut = self.sym_node.symbol.mutable
-        return f"let {"mut " if is_mut else ""}{self.sym_node.render()}{": " + self.sym_node.type.render()} = {self.expr.render()};"
+        return f"let {"mut " if is_mut else ""}{self.sym_node.render()}{": " + self.sym_node.type.render()} = {self.expr.render()}"
 
 class NodeAssignment(Node):
     def __init__(self, lhs: Node, rhs: Node, type: Type) -> None:
@@ -88,7 +88,7 @@ class NodeAssignment(Node):
         self.rhs = rhs
 
     def render(self) -> str:
-        return f"{self.lhs.render()} = {self.rhs.render()};"
+        return f"{self.lhs.render()} = {self.rhs.render()}"
 
 
 class NodeGrouped(Node):
@@ -171,11 +171,11 @@ class NodeGreaterEqualsExpression(NodeBinaryExpr):
 # others
 class NodeBreak(Node):
     def render(self) -> str:
-        return "break;"
+        return "break"
 
 class NodeContinue(Node):
     def render(self) -> str:
-        return "continue;"
+        return "continue"
 
 
 class NodeBlockStmt(NodeStmtList):
@@ -218,7 +218,7 @@ class NodeReturn(Node):
         self.expr = expr
 
     def render(self) -> str:
-        return f"return {self.expr.render()};"
+        return f"return {self.expr.render()}"
 
 class NodeFnParameters(Node):
     def __init__(self, args: list[tuple[NodeSymbol, Node]]):
