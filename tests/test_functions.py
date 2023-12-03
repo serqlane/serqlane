@@ -46,9 +46,7 @@ def test_return(returning_executor, code, variable, expected):
 
 
 def test_recusive_function(returning_executor):
-    assert (
-        returning_executor(
-            """
+    code = """
 fn add_one(x: int): int {
     if x == 1 {
         // should give us 4
@@ -59,8 +57,6 @@ fn add_one(x: int): int {
 }
 
 let w = add_one(1)
-""",
-            "w",
-        )
-        == 4
-    )
+"""
+
+    assert returning_executor(code, "w") == 4
