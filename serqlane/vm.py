@@ -20,9 +20,38 @@ class ReturnError(SerqVMError):
     ...
 
 
+class Register:
+    def __init__(self, name: str, *, use_once: bool = True) -> None:
+        self.name = name
+        self.use_once = use_once
+
+        self._value: Any = None
+        self._set: bool = False
+
+    def is_set(self) -> bool:
+        return self._set
+
+    def get_value(self) -> Any:
+        if self._set:
+            if self.use_once:
+                self._set = False
+            
+            return self._value
+        else:
+            raise ValueError(f"called get_value on unset register {self.name}")
+
+    def set_value(self, value: Any, *, ignore_prev: bool = True):
+        if not ignore_prev and self._set:
+            raise ValueError(f"called set_value on already set register {self.name}")
+        
+        self._value = value
+        self._set = True
+
+
 class SerqVM:
     def __init__(self) -> None:
         self.stack: list[dict[Symbol, Any]] = []
+        self.return_register = Register("return")
 
     # useful for tests
     def get_stack_value_by_name(self, name: str):
@@ -93,9 +122,10 @@ class SerqVM:
                 return self.eval(expression.inner)
 
             case NodeFnCall():
-                if expression.callee.symbol.name == "dbg":
+                if expression.callee.symbol.name == "dbg": # type: ignore (olaf code)
                     val = self.eval(expression.args[0])
                     print(f"DBG: {val}")
+                    # TODO: replace with Unit
                     return None
                 else:
                     stack = self.stack.copy()
@@ -103,25 +133,24 @@ class SerqVM:
 
                     # TODO: Change these lines once function pointers exist
                     assert isinstance(expression.callee, NodeSymbol)
-                    fn_def: NodeFnDefinition = expression.callee.symbol.definition_node
+                    fn_def: NodeFnDefinition = expression.callee.symbol.definition_node # type: ignore (olaf code)
                     for i in range(0, len(expression.args)):
                         val = self.eval(expression.args[i])
                         sym = fn_def.params.args[i][0].symbol
                         self.push_value_on_stack(sym, val)
 
-                    ret_val = None
+                    return_value = None
 
                     try:
                         self.execute_node(fn_def.body)
                     except ReturnError:
-                        if self.stack[-1] == [None]:
-                            ret_val = self.stack[-1][None]
-                            self.exit_scope()  # exit return scope
+                        if self.return_register.is_set():
+                            return_value = self.return_register.get_value()
 
                     self.exit_scope()  # exit function scope
 
                     self.stack = stack
-                    return ret_val
+                    return return_value
             case NodeEmpty():
                 pass
             case _:
@@ -205,14 +234,13 @@ class SerqVM:
                     self.eval(child)
 
                 case NodeReturn():
-                    val = self.eval(child.expr)
-                    self.enter_scope()
-                    self.push_value_on_stack(None, val)
+                    value = self.eval(child.expr)
+                    self.return_register.set_value(value)
                     raise ReturnError()
                 case _:
                     raise NotImplementedError(f"{child=}")
 
-            # print(f"{self.stack=}")
+            print(f"{self.stack=}")
 
     def execute_module(self, module: Module):
         start = module.ast
@@ -225,15 +253,11 @@ class SerqVM:
 
 if __name__ == "__main__":
     code = """
-let x = 1
-
-{
-    let y = 2
+fn add(a: int, b: int): int {
+    return a + b
 }
 
-fn add(w: int): int {
-    w
-}
+let x = add(1, 1)
 """
 
     graph = ModuleGraph()
