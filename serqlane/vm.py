@@ -157,10 +157,6 @@ class SerqVM:
                             return_value = self.return_register.get_value()
                         else:
                             return_value = Unit()
-                    else:
-                        if return_value is None:
-                            logger.debug(f"execute_node returned None; setting return value to Unit")
-                            return_value = Unit()
 
                     self.exit_scope()  # exit function scope
 
