@@ -652,9 +652,19 @@ class CompCtx(lark.visitors.Interpreter):
             result.add(self.visit(child, None))
         if expected_type != None:
             assert len(result.children) > 0
+            result.children[-1] = self.visit(tree.children[-1], expected_type)
             assert expected_type.types_compatible(result.children[-1].type), f"Expected type {expected_type.render()} for block but got {result.children[-1].type.render()}"
+            result.type = result.children[-1].type
+        elif len(result.children) > 0:
+            # Lack of expected type means we have to ensure this is unit
+            assert result.children[-1].type.kind == TypeKind.unit, "A block expression that isn't assigned to anything must be of type unit"
+            result.type = result.children[-1].type
+
         self.current_scope = self.current_scope.parent
         return result
+    
+    def block_expression(self, tree: Tree, expected_type: Type):
+        return self.block_stmt(tree, expected_type)
 
     def grouped_expression(self, tree: Tree, expected_type: Type):
         inner = self.visit(tree.children[0], expected_type)
