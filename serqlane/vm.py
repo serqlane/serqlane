@@ -69,15 +69,6 @@ class SerqVM:
         self.stack: list[dict[Symbol, Any]] = []
         self.return_register = Register("return")
 
-    # useful for tests
-    def get_stack_value_by_name(self, name: str):
-        frame = self.stack[-1]
-        for symbol, value in frame.items():
-            if symbol.name == name:
-                return value
-
-        raise ValueError(f"{name} not found in stack frame")
-
     def eval_binary_expression(self, expression: NodeBinaryExpr) -> Any:
         match expression:
             case NodePlusExpr():
