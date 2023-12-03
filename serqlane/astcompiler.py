@@ -938,6 +938,7 @@ class CompCtx(lark.visitors.Interpreter):
         body_node: NodeBlockStmt = self.visit(tree.children[3], None) # TODO: once block expressions work, this should expect the return type
         assert isinstance(body_node, NodeBlockStmt)
 
+        # TODO: Simplify checks, we can rely on the fact that it has to be transformed into `return x`
         if len(body_node.children) > 0:
             last_body_node = body_node.children[-1]
             if (last_body_node.type == None or last_body_node.type.kind == TypeKind.unit) and not isinstance(last_body_node, NodeReturn):
