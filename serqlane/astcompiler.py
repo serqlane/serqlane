@@ -246,7 +246,7 @@ class NodeFnDefinition(Node):
         self.body = body
 
     def render(self) -> str:
-        return f"fn {self.sym.render()}({self.params.render()}) {self.body.render()}"
+        return f"fn {self.sym.render()}({self.params.render()}): {self.sym.type.data[1].symbol.type.render()} {self.body.render()}"
 
 class NodeFnCall(Node):
     def __init__(self, callee: Node, args: list[Node], type: Type | None = None) -> None:
@@ -642,12 +642,14 @@ class CompCtx(lark.visitors.Interpreter):
 
 
     def block_stmt(self, tree: Tree, expected_type: Type):
-        assert expected_type == None
         self.current_scope = self.current_scope.make_child()
         result = NodeBlockStmt(self.current_scope)
         # Have to be very careful with symbols, we do not want to use one that only exists later
         for child in tree.children:
             result.add(self.visit(child, None))
+        if expected_type != None:
+            assert len(result.children) > 0
+            assert expected_type.types_compatible(result.children[-1].type), f"Expected type {expected_type.render()} for block but got {result.children[-1].type.render()}"
         self.current_scope = self.current_scope.parent
         return result
 
@@ -932,6 +934,14 @@ class CompCtx(lark.visitors.Interpreter):
 
         body_node = self.visit(tree.children[3], None) # TODO: once block expressions work, this should expect the return type
         assert isinstance(body_node, NodeBlockStmt)
+
+        if len(body_node.children) > 0:
+            last_body_node = body_node.children[-1]
+            if last_body_node.type.kind in literal_types:
+                body_node = self.visit(tree.children[3], ret_type)
+
+            if last_body_node.type.kind in builtin_userspace_types:
+                assert last_body_node.type.types_compatible(ret_type), f"Invalid return expression type {last_body_node.type.render()} for return type {ret_type.render()}"
 
         self.fn_ret_type_stack.pop()
 
