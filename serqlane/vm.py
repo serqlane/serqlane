@@ -282,8 +282,11 @@ fn add_one(x: int): unit {
 add_one(1)
 """
 
-    logger.setLevel(logging.DEBUG)
-    logger.addHandler(logging.StreamHandler())
+    import socket
+
+    if socket.gethostname() == "starrnix":
+        logger.setLevel(logging.DEBUG)
+        logger.addHandler(logging.StreamHandler())
 
     graph = ModuleGraph()
     module = graph.load("<string>", code)
