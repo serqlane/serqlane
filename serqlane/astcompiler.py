@@ -561,6 +561,9 @@ class CompCtx(lark.visitors.Interpreter):
     def get_infer_type(self) -> Type:
         return Type(kind=TypeKind.infer, sym=None)
 
+    def get_unit_type(self) -> Type:
+        return self.current_scope.lookup_type("unit", shallow=True)
+
     # overrides
     def visit(self, tree: Tree, expected_type: Type) -> Node:
         return self._visit_tree(tree, expected_type)
@@ -914,7 +917,7 @@ class CompCtx(lark.visitors.Interpreter):
             assert isinstance(ret_type_node, NodeSymbol)
             ret_type = ret_type_node.type # TODO: Fix this nonsense, type should be `type`, not whatever the type evaluates to
         else:
-            ret_type = self.current_scope.lookup_type("unit", shallow=True)
+            ret_type = self.get_unit_type()
 
 
         # TODO: Use a type cache to load function with the same type from it for easier matching
@@ -932,7 +935,7 @@ class CompCtx(lark.visitors.Interpreter):
         self.fn_ret_type_stack.append(ret_type)
 
 
-        body_node = self.visit(tree.children[3], None) # TODO: once block expressions work, this should expect the return type
+        body_node: NodeBlockStmt = self.visit(tree.children[3], None) # TODO: once block expressions work, this should expect the return type
         assert isinstance(body_node, NodeBlockStmt)
 
         if len(body_node.children) > 0:
@@ -943,10 +946,15 @@ class CompCtx(lark.visitors.Interpreter):
                 pass # return is already checked
             elif last_body_node.type.kind in literal_types:
                 body_node = self.visit(tree.children[3], ret_type)
+                last_body_node = body_node.children[-1]
                 if last_body_node.type.kind in builtin_userspace_types:
                     assert last_body_node.type.types_compatible(ret_type), f"Invalid return expression type {last_body_node.type.render()} for return type {ret_type.render()}"
+                body_node.children[-1] = NodeReturn(last_body_node)
             else:
                 assert last_body_node.type.types_compatible(ret_type), f"Invalid return expression type {last_body_node.type.render()} for return type {ret_type.render()}"
+                body_node.children[-1] = NodeReturn(last_body_node)
+        else:
+            body_node.children.append(NodeReturn(NodeEmpty(self.get_unit_type())))
 
         self.fn_ret_type_stack.pop()
 
