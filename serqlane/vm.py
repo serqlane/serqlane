@@ -1,6 +1,8 @@
-import operator
-from typing import Any
 import logging
+import operator
+
+from collections.abc import Callable
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +63,9 @@ class Unit: ...
 
 
 class SerqVM:
-    def __init__(self) -> None:
+    def __init__(self, *, debug_hook: Callable[[Any], None] | None = None) -> None:
+        self.debug_hook = debug_hook
+
         self.stack: list[dict[Symbol, Any]] = []
         self.return_register = Register("return")
 
@@ -136,7 +140,10 @@ class SerqVM:
             case NodeFnCall():
                 if expression.callee.symbol.name == "dbg": # type: ignore (olaf code)
                     val = self.eval(expression.args[0])
-                    print(f"DBG: {val}")
+                    if self.debug_hook is None:
+                        print(f"DBG: {val}")
+                    else:
+                        self.debug_hook(val)
                     return Unit()
                 else:
                     stack = self.stack.copy()
