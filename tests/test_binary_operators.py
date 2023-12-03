@@ -1,14 +1,14 @@
 import pytest
 
-# code, variable, expected
+# code, expected
 literal_arith_tests = [
-    ("let x = 1 + 1", "x", 2),
-    ("let x = 1 - 1", "x", 0),
-    ("let x = 1 * 2", "x", 2),
-    ("let x = 1 / 1", "x", 1),
-    ("let x = 1 + 1 + 1", "x", 3),
-    ("let x = 10 / (3 + 2)", "x", 2),
-    ("let x = (10 / (3 + 2))", "x", 2),
+    ("dbg(1 + 1)", 2),
+    ("dbg(1 - 1)", 0),
+    ("dbg(1 * 2)", 2),
+    ("dbg(1 / 1)", 1),
+    ("dbg(1 + 1 + 1)", 3),
+    ("dbg(10 / (3 + 2))", 2),
+    ("dbg((10 / (3 + 2)))", 2),
 ]
 
 variable_arith_tests = [
@@ -16,16 +16,16 @@ variable_arith_tests = [
         """
 let x = 1
 let y = x + 2
+dbg(y)
 """,
-        "y",
         3,
     ),
     (
         """
 let x = 1
 let y = x + x
+dbg(y)
 """,
-        "y",
         2,
     ),
 ]
@@ -47,14 +47,15 @@ let x = 1 == true
 ]
 
 
-@pytest.mark.parametrize("code,variable,expected", literal_arith_tests)
-def test_literal_arith(returning_executor, code, variable, expected):
-    assert returning_executor(code, variable) == expected
+
+@pytest.mark.parametrize("code,expected", literal_arith_tests)
+def test_literal_arith(capture_first_debug, code, expected):
+    assert capture_first_debug(code) == expected
 
 
-@pytest.mark.parametrize("code,variable,expected", variable_arith_tests)
-def test_variable_arith(returning_executor, code, variable, expected):
-    assert returning_executor(code, variable) == expected
+@pytest.mark.parametrize("code,expected", variable_arith_tests)
+def test_variable_arith(capture_first_debug, code, expected):
+    assert capture_first_debug(code) == expected
 
 
 @pytest.mark.parametrize("code", type_inference_expected_failure_tests)
@@ -63,11 +64,12 @@ def test_type_inference_expected_failures(executor, code):
         executor(code)
 
 
-def test_type_inference(returning_executor):
+def test_type_inference(capture_first_debug):
     code = """
 let x = 100
 let y = true
 let z = x > 0 and (x == 100) or false
+dbg(z)
 """
 
-    assert returning_executor(code, "z") == True
+    assert capture_first_debug(code) == True

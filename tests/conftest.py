@@ -8,9 +8,9 @@ from serqlane.astcompiler import ModuleGraph
 
 @pytest.fixture
 def executor() -> Callable[[str], SerqVM]:
-    def execute(code: str):
+    def execute(code: str, *, debug_hook = None):
         graph = ModuleGraph()
-        vm = SerqVM()
+        vm = SerqVM(debug_hook=debug_hook)
         module = graph.load("<string>", code)
         vm.execute_module(module)
         return vm
@@ -19,9 +19,24 @@ def executor() -> Callable[[str], SerqVM]:
 
 
 @pytest.fixture
-def returning_executor(executor) -> Callable[[str, str], Any]:
-    def execute_then_return(code: str, variable: str) -> Any:
-        vm = executor(code)
-        return vm.get_stack_value_by_name(variable)
+def capture_first_debug(executor) -> Callable[[str], Any]:
+    def execute_and_capture(code: str) -> Any:
+        class MISSING: ...
 
-    return execute_then_return
+        captured = MISSING()
+
+        def _debug_hook(value: Any):
+            nonlocal captured
+            if not isinstance(captured, MISSING):
+                raise RuntimeError("dbg called twice")
+            
+            captured = value
+
+        executor(code, debug_hook=_debug_hook)
+
+        if isinstance(captured, MISSING):
+            raise RuntimeError("dbg not called")
+        
+        return captured
+
+    return execute_and_capture

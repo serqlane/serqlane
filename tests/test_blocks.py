@@ -1,19 +1,21 @@
-def test_mut_block(returning_executor):
+def test_mut_block(capture_first_debug):
     code = """
 let mut i = 1
 {
     i = i + i
 }
+dbg(i)
 """
 
-    assert returning_executor(code, "i") == 2
+    assert capture_first_debug(code) == 2
 
 
-def test_block_expression(returning_executor):
+def test_block_expression(capture_first_debug):
     code = """
 let x = {
     1 + 1
 }
+dbg(x)
 """
 
-    assert returning_executor(code, "x") == 2
+    assert capture_first_debug(code) == 2
