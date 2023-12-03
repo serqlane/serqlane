@@ -1,6 +1,5 @@
 import logging
 import operator
-
 from collections.abc import Callable
 from typing import Any
 
@@ -23,7 +22,9 @@ class BreakError(SerqVMError):
 
 
 class ReturnError(SerqVMError):
-    ...
+    def __init__(self, value: Any) -> None:
+        super().__init__()
+        self.value = value
 
 
 class Register:
@@ -44,7 +45,7 @@ class Register:
         if self._set:
             if self.use_once:
                 self._set = False
-            
+
             return self._value
         else:
             raise ValueError(f"called get_value on unset register {self.name}")
@@ -59,7 +60,8 @@ class Register:
         self._set = True
 
 
-class Unit: ...
+class Unit:
+    ...
 
 
 class SerqVM:
@@ -128,7 +130,7 @@ class SerqVM:
                 return self.eval(expression.inner)
 
             case NodeFnCall():
-                if expression.callee.symbol.name == "dbg": # type: ignore (olaf code)
+                if expression.callee.symbol.name == "dbg":  # type: ignore (olaf code)
                     val = self.eval(expression.args[0])
                     if self.debug_hook is None:
                         print(f"DBG: {val}")
@@ -141,17 +143,20 @@ class SerqVM:
 
                     # TODO: Change these lines once function pointers exist
                     assert isinstance(expression.callee, NodeSymbol)
-                    fn_def: NodeFnDefinition = expression.callee.symbol.definition_node # type: ignore (olaf code)
+                    fn_def: NodeFnDefinition = expression.callee.symbol.definition_node  # type: ignore (olaf code)
                     for i in range(0, len(expression.args)):
                         val = self.eval(expression.args[i])
                         sym = fn_def.params.args[i][0].symbol
                         self.push_value_on_stack(sym, val)
 
-
-                    return_value = self.execute_node(fn_def.body)
-
-                    if return_value is None:
-                        raise RuntimeError(f"None return from function {expression.callee.symbol}")
+                    try:
+                        self.execute_node(fn_def.body)
+                    except ReturnError as e:
+                        return_value = e.value
+                    else:
+                        raise RuntimeError(
+                            f"None return from function {expression.callee.symbol}"
+                        )
 
                     self.exit_scope()  # exit function scope
 
@@ -242,11 +247,15 @@ class SerqVM:
                     self.eval(child)
 
                 case NodeReturn():
-                    return self.eval(child.expr)
+                    return_value = self.eval(child.expr)
+                    logger.debug(f"returning with {return_value}")
+                    raise ReturnError(return_value)
 
                 case _:
                     # assume expression
                     self.eval(child)
+
+            #logger.debug(f"{self.stack=}")
 
     def execute_module(self, module: Module):
         start = module.ast
@@ -259,12 +268,16 @@ class SerqVM:
 
 if __name__ == "__main__":
     code = """
-fn add(a: int, b: int): int {
-    return a + b
+fn add_one(x: int): int {
+    if x == 1 {
+        // should give us 4
+        return add_one(x + 1) + 1
+    }
+    return x + 1
 }
 
-let x = add(1, 1)
-dbg(x)
+let w = add_one(2)
+dbg(w)
 """
 
     import socket
