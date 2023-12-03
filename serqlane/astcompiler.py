@@ -779,7 +779,7 @@ class CompCtx(lark.visitors.Interpreter):
         sym = self.current_scope.lookup(val)
         if sym:
             if expected_type != None:
-                sym.type.types_compatible(expected_type)
+                assert sym.type.types_compatible(expected_type)
             return NodeSymbol(sym, type=sym.type)
         # TODO: Error reporting
         raise ValueError(f"Bad identifier: {val}")
