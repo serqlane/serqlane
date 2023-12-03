@@ -937,12 +937,14 @@ class CompCtx(lark.visitors.Interpreter):
 
         if len(body_node.children) > 0:
             last_body_node = body_node.children[-1]
-            if last_body_node.type == None or last_body_node.type.kind == TypeKind.unit:
-                pass
+            if (last_body_node.type == None or last_body_node.type.kind == TypeKind.unit) and not isinstance(last_body_node, NodeReturn):
+                assert False, f"Returning a unit type for expected type {ret_type.render()} is not permitted"
             elif last_body_node.type.kind in literal_types:
                 body_node = self.visit(tree.children[3], ret_type)
                 if last_body_node.type.kind in builtin_userspace_types:
                     assert last_body_node.type.types_compatible(ret_type), f"Invalid return expression type {last_body_node.type.render()} for return type {ret_type.render()}"
+            else:
+                assert last_body_node.type.types_compatible(ret_type), f"Invalid return expression type {last_body_node.type.render()} for return type {ret_type.render()}"
 
         self.fn_ret_type_stack.pop()
 
