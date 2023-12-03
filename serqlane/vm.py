@@ -67,7 +67,6 @@ class SerqVM:
         self.debug_hook = debug_hook
 
         self.stack: list[dict[Symbol, Any]] = []
-        self.return_register = Register("return")
 
     def eval_binary_expression(self, expression: NodeBinaryExpr) -> Any:
         match expression:
@@ -148,13 +147,11 @@ class SerqVM:
                         sym = fn_def.params.args[i][0].symbol
                         self.push_value_on_stack(sym, val)
 
-                    try:
-                        return_value = self.execute_node(fn_def.body)
-                    except ReturnError:
-                        if self.return_register.is_set():
-                            return_value = self.return_register.get_value()
-                        else:
-                            return_value = Unit()
+
+                    return_value = self.execute_node(fn_def.body)
+
+                    if return_value is None:
+                        raise RuntimeError(f"None return from function {expression.callee.symbol}")
 
                     self.exit_scope()  # exit function scope
 
@@ -194,7 +191,6 @@ class SerqVM:
         raise KeyError(f"{symbol} not found in scope")
 
     def execute_node(self, line: NodeStmtList):
-        return_value = Unit()
         for child in line.children:
             match child:
                 case NodeLet():
@@ -208,7 +204,7 @@ class SerqVM:
 
                 case NodeBlockStmt():
                     self.enter_scope()
-                    return_value = self.execute_node(child)
+                    self.execute_node(child)
                     self.exit_scope()
 
                 case NodeWhileStmt():
@@ -243,18 +239,14 @@ class SerqVM:
                     pass  # nop
 
                 case NodeFnCall():
-                    return_value = self.eval(child)
+                    self.eval(child)
 
                 case NodeReturn():
-                    value = self.eval(child.expr)
-                    self.return_register.set_value(value)
-                    raise ReturnError()
+                    return self.eval(child.expr)
 
                 case _:
                     # assume expression
-                    return_value = self.eval(child)
-
-        return return_value
+                    self.eval(child)
 
     def execute_module(self, module: Module):
         start = module.ast
@@ -267,11 +259,12 @@ class SerqVM:
 
 if __name__ == "__main__":
     code = """
-fn add(a: int, b: int): string {
-    a + b
+fn add(a: int, b: int): int {
+    return a + b
 }
 
 let x = add(1, 1)
+dbg(x)
 """
 
     import socket
