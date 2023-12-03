@@ -264,7 +264,7 @@ class SymbolKind(Enum):
 
 
 class Symbol:
-    def __init__(self, id: str, name: str, type: Type = None, mutable: bool = False) -> None:
+    def __init__(self, id: str, name: str, type: Type = None, mutable: bool = False, magic=False) -> None:
         # TODO: Should store the source node, symbol kinds
         self.id = id
         self.name = name
@@ -272,6 +272,7 @@ class Symbol:
         self.exported = False
         self.mutable = mutable
         self.definition_node: Node = None
+        self.magic = magic
 
     def __repr__(self) -> str:
         return self.render()
@@ -524,10 +525,17 @@ class Scope:
         result = Symbol(self.module_graph.sym_id_gen.next(), name=name)
         self._local_syms.append(result)
         return result
+    
+    def put_magic(self, name: str) -> Symbol:
+        assert type(name) == str
+        if self.lookup(name, shallow=True): raise ValueError(f"redefinition of magic sym: {name}")
+        result = Symbol(self.module_graph.sym_id_gen.next(), name=name, magic=True)
+        self._local_syms.append(result)
+        return result
 
     def put_builtin_type(self, kind: TypeKind) -> Symbol:
         # TODO: Get rid of this hack
-        sym = self.put(kind.name, checked=False)
+        sym = self.put_magic(kind.name)
         sym.type = Type(kind=kind, sym=sym)
         return sym
 
@@ -1086,13 +1094,13 @@ class ModuleGraph:
         self.builtin_scope.put_builtin_type(TypeKind.pointer)
 
         # TODO: hack
-        native_int = self.builtin_scope.put("int", checked=False)
+        native_int = self.builtin_scope.put_magic("int")
         native_int.type = self.builtin_scope.lookup(TypeKind.int64.name).type
 
-        native_uint = self.builtin_scope.put("uint", checked=False)
+        native_uint = self.builtin_scope.put_magic("uint")
         native_uint.type = self.builtin_scope.lookup(TypeKind.uint64.name).type
 
-        native_float = self.builtin_scope.put("float", checked=False)
+        native_float = self.builtin_scope.put_magic("float")
         native_float.type = self.builtin_scope.lookup(TypeKind.float64.name).type
         
         # TODO
@@ -1106,7 +1114,7 @@ class ModuleGraph:
         magic_type = Type(TypeKind.magic, magic_sym)
         magic_sym.type = magic_type
 
-        dbg_sym = self.builtin_scope.put("dbg")
+        dbg_sym = self.builtin_scope.put_magic("dbg")
         dbg_sym.type = Type(TypeKind.function, dbg_sym, ([magic_type], NodeSymbol(unit_type_sym, unit_type_sym.type)))
 
 
