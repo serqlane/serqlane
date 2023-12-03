@@ -245,7 +245,7 @@ class SerqVM:
                     pass  # nop
 
                 case NodeFnCall():
-                    return self.eval(child)
+                    return_value = self.eval(child)
 
                 case NodeReturn():
                     value = self.eval(child.expr)
