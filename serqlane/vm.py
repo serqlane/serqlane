@@ -163,6 +163,22 @@ class SerqVM:
                     self.stack = stack
                     return return_value
 
+            # TODO: add NodeBlockExpression
+            # NOTE: this is actually a block expression
+            case NodeBlockStmt():
+                stack = self.stack.copy()
+                self.enter_scope()
+
+                return_value = self.execute_node(expression)
+
+                if return_value is None:
+                    raise RuntimeError("None return in block expression")
+
+                self.exit_scope()
+
+                self.stack = stack
+                return return_value
+
             case NodeEmpty():
                 return Unit()
 
@@ -196,6 +212,7 @@ class SerqVM:
         raise KeyError(f"{symbol} not found in scope")
 
     def execute_node(self, line: NodeStmtList):
+        return_value = Unit()
         for child in line.children:
             match child:
                 case NodeLet():
@@ -209,7 +226,7 @@ class SerqVM:
 
                 case NodeBlockStmt():
                     self.enter_scope()
-                    self.execute_node(child)
+                    return_value = self.execute_node(child)
                     self.exit_scope()
 
                 case NodeWhileStmt():
@@ -236,15 +253,15 @@ class SerqVM:
                 case NodeIfStmt():
                     evaluated_cond = self.eval(child.cond_expr)
                     if evaluated_cond:
-                        self.execute_node(child.if_body)
+                        return_value = self.execute_node(child.if_body)
                     else:
-                        self.execute_node(child.else_body)
+                        return_value = self.execute_node(child.else_body)
 
                 case NodeFnDefinition():
                     pass  # nop
 
                 case NodeFnCall():
-                    self.eval(child)
+                    return_value = self.eval(child)
 
                 case NodeReturn():
                     return_value = self.eval(child.expr)
@@ -253,9 +270,11 @@ class SerqVM:
 
                 case _:
                     # assume expression
-                    self.eval(child)
+                    return_value = self.eval(child)
 
             #logger.debug(f"{self.stack=}")
+
+        return return_value
 
     def execute_module(self, module: Module):
         start = module.ast
@@ -269,7 +288,7 @@ class SerqVM:
 if __name__ == "__main__":
     code = """
 let x = {
-    1 + 1
+    "1 + 1"
 }
 dbg(x)
 """
@@ -282,7 +301,7 @@ dbg(x)
 
     graph = ModuleGraph()
     module = graph.load("<string>", code)
-    print(module.ast.render())
+    #print(module.ast.render())
 
     vm = SerqVM()
     vm.execute_module(module)
