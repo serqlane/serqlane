@@ -943,8 +943,6 @@ class CompCtx(lark.visitors.Interpreter):
         # TODO: Make this work for generics later
         self.fn_ret_type_stack.append(ret_type)
 
-        print("PUTTING RET TYPE")
-        print(ret_type.kind)
         body_node: NodeBlockStmt = self.visit(tree.children[3], self.get_infer_type()) # TODO: once block expressions work, this should expect the return type
         assert isinstance(body_node, NodeBlockStmt)
 
