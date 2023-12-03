@@ -939,6 +939,8 @@ class CompCtx(lark.visitors.Interpreter):
             last_body_node = body_node.children[-1]
             if (last_body_node.type == None or last_body_node.type.kind == TypeKind.unit) and not isinstance(last_body_node, NodeReturn):
                 assert False, f"Returning a unit type for expected type {ret_type.render()} is not permitted"
+            elif isinstance(last_body_node, NodeReturn):
+                pass # return is already checked
             elif last_body_node.type.kind in literal_types:
                 body_node = self.visit(tree.children[3], ret_type)
                 if last_body_node.type.kind in builtin_userspace_types:
