@@ -10,6 +10,8 @@ class ContinueError(SerqVMError): ...
 
 class BreakError(SerqVMError): ...
 
+class ReturnError(SerqVMError): ...
+
 
 class SerqVM:
     def __init__(self) -> None:
@@ -102,10 +104,14 @@ class SerqVM:
                         sym = fn_def.params.args[i][0].symbol
                         self.push_value_on_stack(sym, val)
 
-                    self.execute_node(fn_def.body)
+                    ret_val = None
 
-                    ret_val = self.stack[-1][None]
-                    self.exit_scope() # exit return scope
+                    try:
+                        self.execute_node(fn_def.body)
+                    except ReturnError:
+                        if self.stack[-1] == [None]:
+                            ret_val = self.stack[-1][None]
+                            self.exit_scope() # exit return scope
 
                     self.exit_scope() # exit function scope
 
@@ -197,7 +203,7 @@ class SerqVM:
                     val = self.eval(child.expr)
                     self.enter_scope()
                     self.push_value_on_stack(None, val)
-
+                    raise ReturnError()
                 case _:
                     raise NotImplementedError(f"{child=}")
 
