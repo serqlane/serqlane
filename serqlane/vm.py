@@ -256,7 +256,7 @@ class SerqVM:
                     # assume expression
                     return_value = self.eval(child)
 
-            print(f"{self.stack=}")
+            logger.debug(f"{self.stack=}")
 
         return return_value
 
@@ -271,15 +271,15 @@ class SerqVM:
 
 if __name__ == "__main__":
     code = """
-fn foo(x: int): int {
-    if x == 2 {
-        return foo(x - 1)
+fn fib(x: int): int {
+    if x <= 1 {
+        return x
     }
-    return x
+
+    fib(x - 1) + fib(x - 2)
 }
 
-dbg(foo(2))
-dbg(foo(1))
+dbg(fib(25))
 """
 
     logger.setLevel(logging.DEBUG)
