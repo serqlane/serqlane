@@ -245,7 +245,7 @@ class SerqVM:
                     pass  # nop
 
                 case NodeFnCall():
-                    return self.eval(child)
+                    return_value = self.eval(child)
 
                 case NodeReturn():
                     value = self.eval(child.expr)
@@ -256,7 +256,7 @@ class SerqVM:
                     # assume expression
                     return_value = self.eval(child)
 
-            print(f"{self.stack=}")
+            logger.debug(f"{self.stack=}")
 
         return return_value
 
@@ -271,15 +271,15 @@ class SerqVM:
 
 if __name__ == "__main__":
     code = """
-fn add_one(x: int): unit {
-    if x == 1 {
-        return
+fn fib(x: int): int {
+    if x <= 1 {
+        return x
     }
 
-    x + 1
+    fib(x - 1) + fib(x - 2)
 }
 
-add_one(1)
+dbg(fib(25))
 """
 
     import socket
