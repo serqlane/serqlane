@@ -13,6 +13,9 @@ lark = "^1.1.5"
 [tool.poetry.group.test.dependencies]
 pytest = "^7.4.3"
 
+[tool.poetry.scripts]
+serqlane = "serqlane.__main__:main"
+
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
