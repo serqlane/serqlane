@@ -10,8 +10,8 @@ fn add(a: int, b: int): int {
 }
 
 let x = add(1, 1)
+dbg(x)
 """,
-        "x",
         2,
     ),
     (
@@ -21,8 +21,8 @@ fn add(a: int, b: int): int {
 }
 
 let x = add(1, 1)
+dbg(x)
 """,
-        "x",
         2,
     ),
 ]
@@ -40,12 +40,12 @@ fn foo(x: int): int {
     )
 
 
-@pytest.mark.parametrize("code,variable,expected", return_tests)
-def test_return(returning_executor, code, variable, expected):
-    assert returning_executor(code, variable) == expected
+@pytest.mark.parametrize("code,expected", return_tests)
+def test_return(capture_first_debug, code, expected):
+    assert capture_first_debug(code) == expected
 
 
-def test_recusive_function(returning_executor):
+def test_recusive_function(capture_first_debug):
     code = """
 fn add_one(x: int): int {
     if x == 1 {
@@ -57,6 +57,7 @@ fn add_one(x: int): int {
 }
 
 let w = add_one(1)
+dbg(w)
 """
 
-    assert returning_executor(code, "w") == 4
+    assert capture_first_debug(code) == 4

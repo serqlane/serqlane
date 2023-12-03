@@ -1,15 +1,16 @@
-def test_while(returning_executor):
+def test_while(capture_first_debug):
     code = """
 let mut x = 10
 while x > 0 {
     x = x - 1
 }
+dbg(x)
 """
 
-    assert returning_executor(code, "x") == 0
+    assert capture_first_debug(code) == 0
 
 
-def test_break(returning_executor):
+def test_break(capture_first_debug):
     code = """
 let mut x = 10
 while x > 0 {
@@ -18,12 +19,13 @@ while x > 0 {
         break
     }
 }
+dbg(x)
 """
 
-    assert returning_executor(code, "x") == 5
+    assert capture_first_debug(code) == 5
 
 
-def test_continue(returning_executor):
+def test_continue(capture_first_debug):
     code = """
 let mut x = 3
 while x > 0 {
@@ -33,6 +35,7 @@ while x > 0 {
     }
     x = x - 1
 }
+dbg(x)
 """
 
-    assert returning_executor(code, "x") == 0
+    assert capture_first_debug(code) == 0

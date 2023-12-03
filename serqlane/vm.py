@@ -278,15 +278,7 @@ class SerqVM:
 
 if __name__ == "__main__":
     code = """
-fn fib(x: int): int {
-    if x <= 1 {
-        return x
-    }
-
-    fib(x - 1) + fib(x - 2)
-}
-
-dbg(fib(25))
+dbg(1 * 2)
 """
 
     import socket
