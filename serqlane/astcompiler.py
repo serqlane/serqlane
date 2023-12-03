@@ -365,6 +365,11 @@ logical_types = frozenset([
     TypeKind.bool
 ] + list(int_types))
 
+free_infer_types = frozenset([
+    TypeKind.magic,
+    TypeKind.infer,
+])
+
 
 # TODO: Add the other appropriate types
 builtin_userspace_types = frozenset(list(int_types) + list(float_types) + [TypeKind.bool, TypeKind.char, TypeKind.string, TypeKind.unit])
@@ -381,10 +386,7 @@ class Type:
         """
         other is always the target
         """
-        if self.kind == TypeKind.infer or other.kind == TypeKind.infer:
-            return True
-
-        if self.kind == TypeKind.magic or other.kind == TypeKind.magic:
+        if self.kind in free_infer_types or other.kind in free_infer_types:
             return True
 
         # TODO: Match variant, like generic inst of generic type
@@ -657,7 +659,7 @@ class CompCtx(lark.visitors.Interpreter):
     def handle_literal(self, tree: Tree, expected_type: Type, lookup_name: str, literal_kind: TypeKind, node_type: Type[Node], conv_fn):
         val = tree.children[0].value
         if expected_type != None:
-            if expected_type.kind == TypeKind.infer:
+            if expected_type.kind in free_infer_types:
                 expected_type = self.current_scope.lookup_type(lookup_name, shallow=True)
             else:
                 assert expected_type.types_compatible(Type(literal_kind, sym=None))
