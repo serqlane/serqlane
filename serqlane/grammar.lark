@@ -20,12 +20,13 @@ break_stmt: "break"
 continue_stmt: "continue"
 
 block_stmt: _block
+block_expression: _block
 _block: "{" statement* "}" // TODO: There is no such thing as a block expression right now
 
 while_stmt: "while" expression block_stmt
 if_stmt: "if" expression block_stmt ["else" block_stmt]
 
-expression: literal | identifier | binary_expression | unary_expression | grouped_expression | fn_call_expr
+expression: literal | identifier | binary_expression | unary_expression | grouped_expression | fn_call_expr | block_expression
 grouped_expression: "(" expression ")"
 
 

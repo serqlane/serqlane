@@ -1,6 +1,7 @@
-import operator
-from typing import Any
 import logging
+import operator
+from collections.abc import Callable
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +22,9 @@ class BreakError(SerqVMError):
 
 
 class ReturnError(SerqVMError):
-    ...
+    def __init__(self, value: Any) -> None:
+        super().__init__()
+        self.value = value
 
 
 class Register:
@@ -42,7 +45,7 @@ class Register:
         if self._set:
             if self.use_once:
                 self._set = False
-            
+
             return self._value
         else:
             raise ValueError(f"called get_value on unset register {self.name}")
@@ -57,22 +60,15 @@ class Register:
         self._set = True
 
 
-class Unit: ...
+class Unit:
+    ...
 
 
 class SerqVM:
-    def __init__(self) -> None:
+    def __init__(self, *, debug_hook: Callable[[Any], None] | None = None) -> None:
+        self.debug_hook = debug_hook
+
         self.stack: list[dict[Symbol, Any]] = []
-        self.return_register = Register("return")
-
-    # useful for tests
-    def get_stack_value_by_name(self, name: str):
-        frame = self.stack[-1]
-        for symbol, value in frame.items():
-            if symbol.name == name:
-                return value
-
-        raise ValueError(f"{name} not found in stack frame")
 
     def eval_binary_expression(self, expression: NodeBinaryExpr) -> Any:
         match expression:
@@ -134,9 +130,12 @@ class SerqVM:
                 return self.eval(expression.inner)
 
             case NodeFnCall():
-                if expression.callee.symbol.name == "dbg": # type: ignore (olaf code)
+                if expression.callee.symbol.name == "dbg":  # type: ignore (olaf code)
                     val = self.eval(expression.args[0])
-                    print(f"DBG: {val}")
+                    if self.debug_hook is None:
+                        print(f"DBG: {val}")
+                    else:
+                        self.debug_hook(val)
                     return Unit()
                 else:
                     stack = self.stack.copy()
@@ -144,24 +143,41 @@ class SerqVM:
 
                     # TODO: Change these lines once function pointers exist
                     assert isinstance(expression.callee, NodeSymbol)
-                    fn_def: NodeFnDefinition = expression.callee.symbol.definition_node # type: ignore (olaf code)
+                    fn_def: NodeFnDefinition = expression.callee.symbol.definition_node  # type: ignore (olaf code)
                     for i in range(0, len(expression.args)):
                         val = self.eval(expression.args[i])
                         sym = fn_def.params.args[i][0].symbol
                         self.push_value_on_stack(sym, val)
 
                     try:
-                        return_value = self.execute_node(fn_def.body)
-                    except ReturnError:
-                        if self.return_register.is_set():
-                            return_value = self.return_register.get_value()
-                        else:
-                            return_value = Unit()
+                        self.execute_node(fn_def.body)
+                    except ReturnError as e:
+                        return_value = e.value
+                    else:
+                        raise RuntimeError(
+                            f"None return from function {expression.callee.symbol}"
+                        )
 
                     self.exit_scope()  # exit function scope
 
                     self.stack = stack
                     return return_value
+
+            # TODO: add NodeBlockExpression
+            # NOTE: this is actually a block expression
+            case NodeBlockStmt():
+                stack = self.stack.copy()
+                self.enter_scope()
+
+                return_value = self.execute_node(expression)
+
+                if return_value is None:
+                    raise RuntimeError("None return in block expression")
+
+                self.exit_scope()
+
+                self.stack = stack
+                return return_value
 
             case NodeEmpty():
                 return Unit()
@@ -237,26 +253,26 @@ class SerqVM:
                 case NodeIfStmt():
                     evaluated_cond = self.eval(child.cond_expr)
                     if evaluated_cond:
-                        self.execute_node(child.if_body)
+                        return_value = self.execute_node(child.if_body)
                     else:
-                        self.execute_node(child.else_body)
+                        return_value = self.execute_node(child.else_body)
 
                 case NodeFnDefinition():
                     pass  # nop
 
                 case NodeFnCall():
-                    return self.eval(child)
+                    return_value = self.eval(child)
 
                 case NodeReturn():
-                    value = self.eval(child.expr)
-                    self.return_register.set_value(value)
-                    raise ReturnError()
+                    return_value = self.eval(child.expr)
+                    logger.debug(f"returning with {return_value}")
+                    raise ReturnError(return_value)
 
                 case _:
                     # assume expression
                     return_value = self.eval(child)
 
-            print(f"{self.stack=}")
+            #logger.debug(f"{self.stack=}")
 
         return return_value
 
@@ -271,23 +287,21 @@ class SerqVM:
 
 if __name__ == "__main__":
     code = """
-fn add_one(x: int): unit {
-    if x == 1 {
-        return
-    }
-
-    x + 1
+let x = {
+    "1 + 1"
 }
-
-add_one(1)
+dbg(x)
 """
 
-    logger.setLevel(logging.DEBUG)
-    logger.addHandler(logging.StreamHandler())
+    import socket
+
+    if socket.gethostname() == "starrnix":
+        logger.setLevel(logging.DEBUG)
+        logger.addHandler(logging.StreamHandler())
 
     graph = ModuleGraph()
     module = graph.load("<string>", code)
-    # print(module.ast.render())
+    #print(module.ast.render())
 
     vm = SerqVM()
     vm.execute_module(module)
