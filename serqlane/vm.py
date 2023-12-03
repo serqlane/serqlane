@@ -231,8 +231,8 @@ let x = 1
     let y = 2
 }
 
-fn add(w: int): int {
-    w
+fn add(w: int) -> int {
+    return w
 }
 """
 

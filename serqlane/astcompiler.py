@@ -782,6 +782,9 @@ class CompCtx(lark.visitors.Interpreter):
         # TODO: Error reporting
         raise ValueError(f"Bad identifier: {val}")
 
+    def return_user_type(self, tree: Tree, expected_type: Type):
+        return self.user_type(tree, expected_type)
+
     def user_type(self, tree: Tree, expected_type: Type):
         return self.visit(tree.children[0], None) # TODO: Enforce `type` metatype
 
