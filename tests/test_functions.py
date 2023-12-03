@@ -51,3 +51,11 @@ fn add(a: int, b: int): int {
 
 let x = add(1, 1)
 """, "x", 2)
+
+    checking_executor("""
+fn add(a: int, b: int): int {
+    a + b
+}
+
+let x = add(1, 1)
+""", "x", 2)
