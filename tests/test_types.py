@@ -11,7 +11,7 @@ def test_floating_function_return_type(executor):
     with pytest.raises(AssertionError):
         executor(
             """
-fn add(a: int, b: int): string {
+fn add(a: int, b: int) -> string {
     a + b
 }
 
