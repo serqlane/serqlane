@@ -1,13 +1,13 @@
-def test_while(checking_executor):
-    checking_executor("""
+def test_while(returning_executor):
+    assert returning_executor("""
 let mut x = 10
 while x > 0 {
     x = x - 1
 }
-""", "x", 0)
+""", "x") == 0
 
-def test_break(checking_executor):
-    checking_executor("""
+def test_break(returning_executor):
+    assert returning_executor("""
 let mut x = 10
 while x > 0 {
     x = x - 1
@@ -15,10 +15,10 @@ while x > 0 {
         break
     }
 }
-""", "x", 5)
+""", "x") == 5
 
-def test_continue(checking_executor):
-    checking_executor("""
+def test_continue(returning_executor):
+    assert returning_executor("""
 let mut x = 3
 while x > 0 {
     x = x - 1
@@ -27,4 +27,4 @@ while x > 0 {
     }
     x = x - 1
 }
-""", "x", 0)
+""", "x") == 0

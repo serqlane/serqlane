@@ -19,10 +19,9 @@ def executor() -> Callable[[str], SerqVM]:
 
 
 @pytest.fixture
-def checking_executor(executor) -> Callable[[str, str, Any], None]:
-    def execute_with_check(code: str, variable: str, value: Any):
+def returning_executor(executor) -> Callable[[str, str], Any]:
+    def execute_then_return(code: str, variable: str) -> Any:
         vm = executor(code)
-        assert vm.get_stack_value_by_name(variable) == value
+        return vm.get_stack_value_by_name(variable)
 
-    return execute_with_check
-
+    return execute_then_return

@@ -1,63 +1,65 @@
-from collections.abc import Callable
-from typing import Any
 import pytest
 
-from serqlane.vm import SerqVM
-from serqlane.astcompiler import ModuleGraph
+# code, variable, expected
+literal_arith_tests = [
+    ("let x = 1 + 1", "x", 2),
+    ("let x = 1 - 1", "x", 0),
+    ("let x = 1 * 2", "x", 2),
+    ("let x = 1 / 1", "x", 1),
+    ("let x = 1 + 1 + 1", "x", 3),
+    ("let x = 10 / (3 + 2)", "x", 2),
+    ("let x = (10 / (3 + 2))", "x", 2)
+]
 
-
-def test_literal_arith(checking_executor):
-    checking_executor("let x = 1 + 1", "x", 2)
-    checking_executor("let x = 1 - 1", "x", 0)
-    checking_executor("let x = 1 * 2", "x", 2)
-    checking_executor("let x = 1 / 1", "x", 1)
-
-    checking_executor("let x = 1 + 1 + 1", "x", 3)
-    checking_executor("let x = 10 / (3 + 2)", "x", 2)
-    checking_executor("let x = (10 / (3 + 2))", "x", 2)
-
-
-def test_variable_arith(checking_executor):
-    checking_executor(
-        """
+variable_arith_tests = [
+    ("""
 let x = 1
 let y = x + 2
-""",
-        "y",
-        3,
-    )
-
-    checking_executor(
-        """
+""", "y", 3),
+    ("""
 let x = 1
 let y = x + x
 """,
-        "y",
-        2,
-    )
+    "y",
+    2)
+]
 
-
-def test_type_inference(executor, checking_executor):
-    with pytest.raises(ValueError):
-        executor(
-            """
+# code
+type_inference_expected_failure_tests = [
+"""
 let x = "abc"
 let y = x + 1
+""",
 """
-        )
-
-    with pytest.raises(ValueError):
-        executor("""
 let x: int32 = 10
 let y: int64 = 20
 let y: int64 = (x + x) - y
-    """)
+""",
+"""
+let x = 1 == true
+"""
+]
 
+@pytest.mark.parametrize("code,variable,expected", literal_arith_tests)
+def test_literal_arith(returning_executor, code, variable, expected):
+    assert returning_executor(code, variable) == expected
+    
+
+@pytest.mark.parametrize("code,variable,expected", variable_arith_tests)
+def test_variable_arith(returning_executor, code, variable, expected):
+    assert returning_executor(code, variable) == expected
+
+
+@pytest.mark.parametrize("code", type_inference_expected_failure_tests)
+def test_type_inference_expected_failures(executor, code):
     with pytest.raises(ValueError):
-        executor("let x = 1 == true")
+        executor(code)
 
-    checking_executor("""
+def test_type_inference(returning_executor):
+    code = """
 let x = 100
 let y = true
 let z = x > 0 and (x == 100) or false
-""", "z", True)
+"""
+
+    assert returning_executor(code, "z") == True

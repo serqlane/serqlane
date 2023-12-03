@@ -1,3 +1,25 @@
+import pytest
+
+
+# code, variable, expected
+return_tests = [
+    ("""
+fn add(a: int, b: int): int {
+    return a + b
+}
+
+let x = add(1, 1)
+""", "x", 2),
+    ("""
+fn add(a: int, b: int): int {
+    a + b
+}
+
+let x = add(1, 1)
+""", "x", 2)
+]
+
+
 def test_variable_shadowing(executor):
     executor("""
 let x = 1
@@ -8,26 +30,13 @@ fn foo(x: int): int {
 """)
 
 
-def test_return(checking_executor):
-    checking_executor("""
-fn add(a: int, b: int): int {
-    return a + b
-}
-
-let x = add(1, 1)
-""", "x", 2)
-
-    checking_executor("""
-fn add(a: int, b: int): int {
-    a + b
-}
-
-let x = add(1, 1)
-""", "x", 2)
+@pytest.mark.parametrize("code,variable,expected", return_tests)
+def test_return(returning_executor, code, variable, expected):
+    assert returning_executor(code, variable) == expected
 
 
-def test_recusive_function(checking_executor):
-    checking_executor("""
+def test_recusive_function(returning_executor):
+    assert returning_executor("""
 fn add_one(x: int): int {
     if x == 1 {
         // should give us 4
@@ -38,4 +47,4 @@ fn add_one(x: int): int {
 }
 
 let w = add_one(1)
-""", "w", 4)
+""", "w") == 4
