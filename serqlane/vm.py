@@ -1,5 +1,9 @@
 import operator
 from typing import Any
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 from serqlane.astcompiler import *
 
@@ -28,6 +32,9 @@ class Register:
         self._value: Any = None
         self._set: bool = False
 
+    def __repr__(self) -> str:
+        return f"<Register name={self.name}, set={self._set}, value={self._value}>"
+
     def is_set(self) -> bool:
         return self._set
 
@@ -43,7 +50,9 @@ class Register:
     def set_value(self, value: Any, *, ignore_prev: bool = True):
         if not ignore_prev and self._set:
             raise ValueError(f"called set_value on already set register {self.name}")
-        
+
+        logger.debug(f"setting value of register {self.name} to {value}")
+
         self._value = value
         self._set = True
 
@@ -150,6 +159,7 @@ class SerqVM:
                             return_value = Unit()
                     else:
                         if return_value is None:
+                            logger.debug(f"execute_node returned None; setting return value to Unit")
                             return_value = Unit()
 
                     self.exit_scope()  # exit function scope
@@ -239,7 +249,7 @@ class SerqVM:
                     pass  # nop
 
                 case NodeFnCall():
-                    self.eval(child)
+                    return self.eval(child)
 
                 case NodeReturn():
                     value = self.eval(child.expr)
@@ -268,12 +278,19 @@ class SerqVM:
 
 if __name__ == "__main__":
     code = """
-fn add(a: int, b: int): string {
-    a + b
+fn add_one(x: int): int {
+    x + 1
 }
 
-let x = add(1, 1)
+fn add_one_proxy(x: int): int {
+    add_one(x)
+}
+
+let w = add_one_proxy(1)
 """
+
+    logger.setLevel(logging.DEBUG)
+    logger.addHandler(logging.StreamHandler())
 
     graph = ModuleGraph()
     module = graph.load("<string>", code)
