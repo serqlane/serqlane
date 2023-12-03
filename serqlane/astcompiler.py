@@ -912,11 +912,6 @@ class CompCtx(lark.visitors.Interpreter):
         else:
             ret_type = self.current_scope.lookup_type("unit", shallow=True)
 
-        # The sym must be created here to make recursive calls work without polluting the arg scope
-        sym = self.current_scope.parent.put(ident)
-
-        # TODO: Make this work for generics later
-        self.fn_ret_type_stack.append(ret_type)
 
         # TODO: Use a type cache to load function with the same type from it for easier matching
         fn_type = Type(
@@ -924,6 +919,14 @@ class CompCtx(lark.visitors.Interpreter):
             sym=None,
             data=([x[1].type for x in args_node.args], ret_type_node)
         )
+
+        # The sym must be created here to make recursive calls work without polluting the arg scope
+        sym = self.current_scope.parent.put(ident)
+        sym.type = fn_type
+
+        # TODO: Make this work for generics later
+        self.fn_ret_type_stack.append(ret_type)
+
 
         body_node = self.visit(tree.children[3], None) # TODO: once block expressions work, this should expect the return type
         assert isinstance(body_node, NodeBlockStmt)

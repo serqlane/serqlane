@@ -271,15 +271,15 @@ class SerqVM:
 
 if __name__ == "__main__":
     code = """
-fn add_one(x: int): unit {
-    if x == 1 {
-        return
+fn foo(x: int): int {
+    if x == 2 {
+        return foo(x - 1)
     }
-
-    x + 1
+    return x
 }
 
-add_one(1)
+dbg(foo(2))
+dbg(foo(1))
 """
 
     logger.setLevel(logging.DEBUG)
