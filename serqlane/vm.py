@@ -268,9 +268,11 @@ class SerqVM:
 
 if __name__ == "__main__":
     code = """
-let x = {
-    1 + 1
+fn add(a: int, b: int): string {
+    a + b
 }
+
+let x = add(1, 1)
 """
 
     graph = ModuleGraph()
