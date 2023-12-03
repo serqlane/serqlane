@@ -22,4 +22,4 @@ def executor() -> Callable[[str], SerqVM]:
 def test_invalid_cohersion(executor: Callable[[str], SerqVM]):
     # TODO: this should probably raise a better exception
     with pytest.raises(AssertionError):
-        executor("let x: int = \"abc\";")
+        executor("let x: int = \"abc\"")
