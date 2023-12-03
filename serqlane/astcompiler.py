@@ -522,10 +522,10 @@ class Scope:
         if sym != None:
             return sym.type
 
-    def put(self, name: str, checked=True) -> Symbol:
+    def put(self, name: str, checked=True, shallow=False) -> Symbol:
         assert type(name) == str
-        if checked and self.lookup(name): raise ValueError(f"redefinition of {name}")
-        
+        if checked and self.lookup(name, shallow=shallow): raise ValueError(f"redefinition of {name}")
+
         result = Symbol(self.module_graph.sym_id_gen.next(), name=name)
         self._local_syms.append(result)
         return result
@@ -536,8 +536,8 @@ class Scope:
         sym.type = Type(kind=kind, sym=sym)
         return sym
 
-    def put_let(self, name: str, mutable=False) -> Symbol:
-        sym = self.put(name)
+    def put_let(self, name: str, mutable=False, checked=True, shallow=False) -> Symbol:
+        sym = self.put(name, checked=checked, shallow=shallow)
         sym.mutable = mutable
         return sym
 
@@ -884,7 +884,7 @@ class CompCtx(lark.visitors.Interpreter):
             assert child.data == "fn_definition_arg"
             # TODO: Mutable args
             ident = child.children[0].children[0].value
-            sym = self.current_scope.put_let(ident) # effectively a let
+            sym = self.current_scope.put_let(ident, shallow=True) # effectively a let that permits shallow shadowing
             type_node = self.visit(child.children[1], None)
             sym.type = type_node.symbol.type # TODO: This is not clean at all
             params.append((NodeSymbol(sym, sym.type), type_node))
