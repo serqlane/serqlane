@@ -6,7 +6,7 @@ fn_definition_arg: identifier user_type
 
 fn_call_expr: expression fn_call_args
 fn_call_args: "(" [expression ("," expression)*] ")"
-statement: ((return_stmt | break_stmt | continue_stmt | expression | assignment | let_stmt) _TERMINATOR) | (fn_definition | block_stmt | while_stmt | if_stmt)
+statement: ((return_stmt | break_stmt | continue_stmt | expression | assignment | let_stmt) _TERMINATOR?) | (fn_definition | block_stmt | while_stmt | if_stmt)
 
 user_type: ":" expression
 return_user_type: "->" expression
