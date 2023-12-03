@@ -164,7 +164,7 @@ class SerqVM:
                     return return_value
 
             case NodeEmpty():
-                pass
+                return Unit()
 
             case _:
                 raise NotImplementedError(f"{expression=}")
@@ -271,16 +271,15 @@ class SerqVM:
 
 if __name__ == "__main__":
     code = """
-fn add_one(x: int): int {
+fn add_one(x: int): unit {
     if x == 1 {
-        // should give us 4
-        return add_one(x + 1) + 1
+        return
     }
 
     x + 1
 }
 
-let w = add_one(1)
+add_one(1)
 """
 
     logger.setLevel(logging.DEBUG)
