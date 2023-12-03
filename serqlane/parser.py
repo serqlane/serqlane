@@ -16,6 +16,9 @@ class SerqParser:
         self.lark = Lark(grammar)
 
     def parse(self, entry: str, display: bool = False):
+        if not entry.endswith("\n"):
+            entry += "\n"
+
         tree = self.lark.parse(entry)
         if display:
             print(tree.pretty())

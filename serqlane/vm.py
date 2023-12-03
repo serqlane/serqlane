@@ -4,13 +4,20 @@ from typing import Any
 from serqlane.astcompiler import *
 
 
-class SerqVMError(Exception): ...
+class SerqVMError(Exception):
+    ...
 
-class ContinueError(SerqVMError): ...
 
-class BreakError(SerqVMError): ...
+class ContinueError(SerqVMError):
+    ...
 
-class ReturnError(SerqVMError): ...
+
+class BreakError(SerqVMError):
+    ...
+
+
+class ReturnError(SerqVMError):
+    ...
 
 
 class SerqVM:
@@ -86,8 +93,6 @@ class SerqVM:
                 return self.eval(expression.inner)
 
             case NodeFnCall():
-
-
                 if expression.callee.symbol.name == "dbg":
                     val = self.eval(expression.args[0])
                     print(f"DBG: {val}")
@@ -95,7 +100,7 @@ class SerqVM:
                 else:
                     stack = self.stack.copy()
                     self.enter_scope()
-                    
+
                     # TODO: Change these lines once function pointers exist
                     assert isinstance(expression.callee, NodeSymbol)
                     fn_def: NodeFnDefinition = expression.callee.symbol.definition_node
@@ -111,9 +116,9 @@ class SerqVM:
                     except ReturnError:
                         if self.stack[-1] == [None]:
                             ret_val = self.stack[-1][None]
-                            self.exit_scope() # exit return scope
+                            self.exit_scope()  # exit return scope
 
-                    self.exit_scope() # exit function scope
+                    self.exit_scope()  # exit function scope
 
                     self.stack = stack
                     return ret_val
@@ -176,7 +181,7 @@ class SerqVM:
                             self.stack = stack
                         except BreakError:
                             break
- 
+
                     if stack is not None:
                         self.stack = stack
 
@@ -194,7 +199,7 @@ class SerqVM:
                         self.execute_node(child.else_body)
 
                 case NodeFnDefinition():
-                    pass # nop
+                    pass  # nop
 
                 case NodeFnCall():
                     self.eval(child)
@@ -207,7 +212,7 @@ class SerqVM:
                 case _:
                     raise NotImplementedError(f"{child=}")
 
-            #print(f"{self.stack=}")
+            # print(f"{self.stack=}")
 
     def execute_module(self, module: Module):
         start = module.ast
@@ -220,18 +225,20 @@ class SerqVM:
 
 if __name__ == "__main__":
     code = """
-let mut i = 0;
-while true {
-    i = i + 1;
-    if i % 100 == 0 {
-        dbg(i);
-    }
+let x = 1
+
+{
+    let y = 2
+}
+
+fn add(w: int): int {
+    w
 }
 """
 
     graph = ModuleGraph()
     module = graph.load("<string>", code)
-    #print(module.ast.render())
+    # print(module.ast.render())
 
     vm = SerqVM()
     vm.execute_module(module)

@@ -21,9 +21,9 @@ def checking_executor() -> Callable[[str, str, Any], None]:
 def test_mut_block(checking_executor):
     checking_executor(
         """
-let mut i = 1;
+let mut i = 1
 {
-    i = i + i;
+    i = i + i
 }
 """, "i", 2
     )
