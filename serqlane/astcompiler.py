@@ -908,6 +908,10 @@ class CompCtx(lark.visitors.Interpreter):
         assert expected_type.kind == TypeKind.unit
 
         params = []
+
+        if len(tree.children) == 1 and tree.children[0] is None:
+            return NodeFnParameters(params)
+
         for child in tree.children:
             assert child.data == "fn_definition_arg"
             # TODO: Mutable args
