@@ -681,16 +681,27 @@ class CompCtx(lark.visitors.Interpreter):
         return NodeGrouped(inner, inner.type)
 
 
-    def handle_literal(self, tree: Tree, expected_type: Type, lookup_name: str, literal_kind: TypeKind, node_type: Type[Node], conv_fn):
-        val = tree.children[0].value
+    def handle_literal(self, tree: Tree, expected_type: Type, lookup_name: str, literal_kind: TypeKind, node_type: type[NodeLiteral], conv_fn):
+        if len(tree.children) > 0:
+            value = conv_fn(tree.children[0].value)
+        
+        # empty literals i.e. "" or []
+        else:
+            # match so it's easy to add new ones
+            match literal_kind:
+                case TypeKind.literal_string:
+                    value = ""
+                case _:
+                    raise RuntimeError("Unsupported empty literal")
+
         if expected_type != None:
             if expected_type.kind in free_infer_types:
                 expected_type = self.current_scope.lookup_type(lookup_name, shallow=True)
             else:
                 assert expected_type.types_compatible(Type(literal_kind, sym=None))
-            return node_type(value=conv_fn(val), type=expected_type)
+            return node_type(value=value, type=expected_type)
         else:
-            return node_type(value=conv_fn(val), type=Type(literal_kind, sym=None))
+            return node_type(value=value, type=Type(literal_kind, sym=None))
 
     def integer(self, tree: Tree, expected_type: Type):
         return self.handle_literal(tree, expected_type, "int", TypeKind.literal_int, NodeIntLit, int)

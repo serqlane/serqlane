@@ -18,3 +18,8 @@ fn add(a: int, b: int) -> string {
 let x = add(1, 1)
 """
         )
+
+
+def test_empty_literal(capture_first_debug):
+    assert capture_first_debug("dbg(\"\")") == ""
+
