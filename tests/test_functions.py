@@ -72,3 +72,10 @@ fn abc() {
     return
 }
 """)
+
+
+def test_function_call_symbol(executor):
+    with pytest.raises(AssertionError):
+        executor("""
+true()
+""")
