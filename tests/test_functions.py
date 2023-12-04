@@ -71,6 +71,7 @@ def test_function_empty_args(executor):
 fn abc() {
     return
 }
+abc()
 """)
 
 
