@@ -1,0 +1,27 @@
+name: "build"
+on:
+    pull_request:
+        paths:
+            - "serqlane/**"
+            - "flake.*"
+            - ".github/workflows/build.yml"
+            - "pyproject.toml"
+    push:
+        branches: ["main"]
+        paths:
+            - "serqlane/**"
+            - "flake.*"
+            - ".github/workflows/build.yml"
+            - "pyproject.toml"
+
+jobs:
+    build:
+        runs-on: ubuntu-latest
+        steps:
+        - uses: actions/checkout@v4
+        - uses: DeterminateSystems/nix-installer-action@v8
+        - uses: cachix/cachix-action@v13
+          with:
+            name: starrfox
+            authToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
+        - run: nix build
