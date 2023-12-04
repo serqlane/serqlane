@@ -1023,9 +1023,11 @@ class CompCtx(lark.visitors.Interpreter):
 
         params = []
         if tree.children[1] != None:
-            assert len(tree.children[1].children) == len(arg_types)
-            for i in range(0, len(arg_types)):
-                params.append(self.visit(tree.children[1].children[i], arg_types[i]))
+            # child 0 is None in empty calls i.e f()
+            if tree.children[1].children[0] is not None:
+                assert len(tree.children[1].children) == len(arg_types)
+                for i in range(0, len(arg_types)):
+                    params.append(self.visit(tree.children[1].children[i], arg_types[i]))
         else:
             assert len(arg_types) == 0
 
