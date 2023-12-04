@@ -64,3 +64,11 @@ dbg(w)
 """
 
     assert capture_first_debug(code) == 4
+
+
+def test_function_empty_args(executor):
+    executor("""
+fn abc() {
+    return
+}
+""")
