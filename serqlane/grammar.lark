@@ -83,8 +83,8 @@ identifier: /[a-zA-Z](\w|\d)*/
 ?literal: bool | number | string
 !bool: "true" | "false"
 ?number: integer | decimal
-integer: /\d+/
-decimal: /\d+\.\d+/
+integer: /[+-]?\d+/
+decimal: /[+-]?\d+\.\d+/
 string: "\"" /[^"]+/? "\""
 // TODO: char
 
