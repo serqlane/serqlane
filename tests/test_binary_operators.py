@@ -9,6 +9,7 @@ literal_arith_tests = [
     ("dbg(1 + 1 + 1)", 3),
     ("dbg(10 / (3 + 2))", 2),
     ("dbg((10 / (3 + 2)))", 2),
+    ("dbg(10 % 3)", 1),
 ]
 
 variable_arith_tests = [
