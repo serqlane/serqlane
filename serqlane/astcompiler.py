@@ -1008,6 +1008,10 @@ class CompCtx(lark.visitors.Interpreter):
     def fn_call_expr(self, tree: Tree, expected_type: Type):
         # TODO: Once overloads/methods are in, this must scan visible symbols and retrieve a list. Handled in identifier though
         callee = self.visit(tree.children[0], None)
+
+        # TODO: allow non-symbol calls i.e. function pointers
+        assert isinstance(callee, NodeSymbol), "can only call symbols"
+
         arg_types = callee.symbol.type.data[0]
         ret_type_node = callee.symbol.type.data[1]
         ret_type = None
