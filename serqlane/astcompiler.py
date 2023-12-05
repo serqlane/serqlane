@@ -12,6 +12,21 @@ from lark import Token, Tree
 from serqlane.parser import SerqParser
 
 
+RESERVED_KEYWORDS = [
+    "and",
+    "break",
+    "continue",
+    "else",
+    "fn",
+    "if",
+    "let",
+    "mut",
+    "not",
+    "or",
+    "return",
+    "while",
+]
+
 class Node:
     def __init__(self, type: Type) -> None:
         assert type != None and isinstance(type, Type)
@@ -855,6 +870,8 @@ class CompCtx(lark.visitors.Interpreter):
         ident_node = tree.children[f]
         assert ident_node.data == "identifier"
         ident = ident_node.children[0].value
+        if ident in RESERVED_KEYWORDS:
+            raise ValueError(f"Cannot use reserved keyword `{ident}` as a variable name")
 
         f += 1
 
@@ -940,7 +957,8 @@ class CompCtx(lark.visitors.Interpreter):
         ident_node = tree.children[0]
         assert ident_node.data == "identifier"
         ident = ident_node.children[0].value
-
+        if ident in RESERVED_KEYWORDS:
+            raise ValueError(f"Cannot use reserved keyword `{ident}` as a function name")
 
         # must open a scope here to isolate the params
         fn_scope = self.current_scope.make_child()
