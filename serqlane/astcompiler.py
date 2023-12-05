@@ -716,7 +716,6 @@ class CompCtx(lark.visitors.Interpreter):
     def block_stmt(self, tree: Tree, expected_type: Type):
         self.current_scope = self.current_scope.make_child()
         if len(tree.children) == 0:
-            assert expected_type == None or expected_type.kind == TypeKind.unit
             return NodeBlockStmt(self.current_scope, self.get_unit_type())
 
         # Assume unit type if nothing is expected, fixed later
@@ -740,7 +739,7 @@ class CompCtx(lark.visitors.Interpreter):
         return result
     
     def block_expression(self, tree: Tree, expected_type: Type):
-        return self.block_stmt(tree, expected_type, expression_mode=True)
+        return self.block_stmt(tree, expected_type)
 
     def grouped_expression(self, tree: Tree, expected_type: Type):
         inner = self.visit(tree.children[0], expected_type)
@@ -1034,7 +1033,7 @@ class CompCtx(lark.visitors.Interpreter):
         # TODO: Make this work for generics later
         self.fn_ret_type_stack.append(ret_type)
 
-        body_node: NodeBlockStmt = self.visit(tree.children[3], ret_type) # TODO: once block expressions work, this should expect the return type
+        body_node: NodeBlockStmt = self.visit(tree.children[3], self.get_infer_type())
         assert isinstance(body_node, NodeBlockStmt)
 
         # TODO: Simplify checks, we can rely on the fact that it has to be transformed into `return x`
