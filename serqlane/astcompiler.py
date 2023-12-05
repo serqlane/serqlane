@@ -12,6 +12,21 @@ from lark import Token, Tree
 from serqlane.parser import SerqParser
 
 
+RESERVED_KEYWORDS = [
+    "and",
+    "break",
+    "continue",
+    "else",
+    "fn",
+    "if",
+    "let",
+    "mut",
+    "not",
+    "or",
+    "return",
+    "while",
+]
+
 class Node:
     def __init__(self, type: Type) -> None:
         assert type != None and isinstance(type, Type)
@@ -522,6 +537,9 @@ class Scope:
         assert type(name) == str
         if checked and self.lookup(name, shallow=shallow): raise ValueError(f"redefinition of {name}")
 
+        if name in RESERVED_KEYWORDS:
+            raise ValueError(f"Cannot use reserved keyword `{name}` as a symbol name")
+
         result = Symbol(self.module_graph.sym_id_gen.next(), name=name)
         self._local_syms.append(result)
         return result
@@ -587,7 +605,6 @@ class CompCtx(lark.visitors.Interpreter):
     def __default__(self, tree, expected_type: Type):
         raise ValueError(f"{tree=}")
         return self.visit_children(tree, expected_type)
-
 
     # new functions
     def statement(self, tree: Tree, expected_type: Type):
@@ -941,7 +958,6 @@ class CompCtx(lark.visitors.Interpreter):
         assert ident_node.data == "identifier"
         ident = ident_node.children[0].value
 
-
         # must open a scope here to isolate the params
         fn_scope = self.current_scope.make_child()
         self.current_scope = fn_scope
@@ -1144,7 +1160,6 @@ class ModuleGraph:
         mod = Module(name, self._next_id, file_contents, self)
         self._next_id += 1
         self.modules[name] = mod
-        
         # TODO: Make sure the module isn't already being processed
         ast: NodeStmtList = CompCtx(mod, self).visit(mod.lark_tree, None)
         mod.ast = ast
