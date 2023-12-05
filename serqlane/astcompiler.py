@@ -537,6 +537,9 @@ class Scope:
         assert type(name) == str
         if checked and self.lookup(name, shallow=shallow): raise ValueError(f"redefinition of {name}")
 
+        if name in RESERVED_KEYWORDS:
+            raise ValueError(f"Cannot use reserved keyword `{name}` as a symbol name")
+
         result = Symbol(self.module_graph.sym_id_gen.next(), name=name)
         self._local_syms.append(result)
         return result
@@ -603,20 +606,9 @@ class CompCtx(lark.visitors.Interpreter):
         raise ValueError(f"{tree=}")
         return self.visit_children(tree, expected_type)
 
-    def check_reserved_keywords(self, tree):
-        if isinstance(tree, Tree):
-            if tree.data == 'identifier' and tree.children[0].value in RESERVED_KEYWORDS:
-                raise ValueError(f"Cannot use reserved keyword `{tree.children[0].value}` as a symbol name")
-            for child in tree.children:
-                self.check_reserved_keywords(child)
-        elif isinstance(tree, Token):
-            if tree.type == 'identifier' and tree.value in RESERVED_KEYWORDS:
-                raise ValueError(f"Cannot use reserved keyword `{tree.value}` as a symbol name")
-
     # new functions
     def statement(self, tree: Tree, expected_type: Type):
         assert len(tree.children) == 1, f"{len(tree.children)} --- {tree.children=}"
-        self.check_reserved_keywords(tree.children[0])
         return self.visit(tree.children[0], expected_type)
 
 
@@ -1168,7 +1160,6 @@ class ModuleGraph:
         mod = Module(name, self._next_id, file_contents, self)
         self._next_id += 1
         self.modules[name] = mod
-        
         # TODO: Make sure the module isn't already being processed
         ast: NodeStmtList = CompCtx(mod, self).visit(mod.lark_tree, None)
         mod.ast = ast
