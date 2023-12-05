@@ -606,12 +606,12 @@ class CompCtx(lark.visitors.Interpreter):
     def check_reserved_keywords(self, tree):
         if isinstance(tree, Tree):
             if tree.data == 'identifier' and tree.children[0].value in RESERVED_KEYWORDS:
-                raise ValueError(f"Cannot use reserved keyword `{tree.children[0].value}` as a variable name")
+                raise ValueError(f"Cannot use reserved keyword `{tree.children[0].value}` as a symbol name")
             for child in tree.children:
                 self.check_reserved_keywords(child)
         elif isinstance(tree, Token):
             if tree.type == 'identifier' and tree.value in RESERVED_KEYWORDS:
-                raise ValueError(f"Cannot use reserved keyword `{tree.value}` as a variable name")
+                raise ValueError(f"Cannot use reserved keyword `{tree.value}` as a symbol name")
 
     # new functions
     def statement(self, tree: Tree, expected_type: Type):
