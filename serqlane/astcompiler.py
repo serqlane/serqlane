@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from typing import Any, Optional
 from enum import Enum, auto
+from typing import Any, Optional, Iterator
 
 import hashlib
 import textwrap
@@ -392,6 +392,27 @@ class Type:
         self.sym = sym
         # TODO: Add a type id later
 
+    def function_arg_types(self) -> list[Type]:
+        assert self.kind == TypeKind.function
+        return self.data[0]
+
+    def return_type(self) -> Type:
+        assert self.kind == TypeKind.function
+        return self.data[1]
+
+    def function_def_args_identical(self, other: Type) -> bool:
+        assert self.kind == TypeKind.function and other.kind == TypeKind.function
+        my_args = self.function_arg_types()
+        other_args = other.function_arg_types()
+        if len(my_args) != len(other_args):
+            return False # can't be identical if amount is different
+        for i in range(0, len(my_args)):
+            my_arg = my_args[i]
+            other_arg = other_args[i]
+            if not my_arg.types_compatible(other_arg):
+                return False
+        return True
+
     # TODO: Turn into type_relation. literal<->concrete means uninstantiated_literal
     def types_compatible(self, other: Type) -> bool:
         """
@@ -511,6 +532,19 @@ class Scope:
         self.parent: Scope = None
         self.module_graph = graph # TODO: Get rid of builtin hack
 
+    def iter_function_defs(self, name: str) -> Iterator[Symbol]:
+        # prefer magics
+        if self.module_graph.builtin_scope != self:
+            for sym in self.module_graph.builtin_scope.iter_function_defs(name):
+                if sym.name == name:
+                    yield sym
+
+        for sym in self._local_syms:
+            if sym.name == name:
+                yield sym
+        if self.parent != None:
+            yield from self.parent.iter_function_defs(name)
+
     def _lookup_impl(self, name: str, shallow=False) -> Symbol:
         for symbol in self._local_syms:
             if symbol.name == name:
@@ -544,12 +578,27 @@ class Scope:
         self._local_syms.append(result)
         return result
     
+    def put_function(self, name: str, type: Type) -> Symbol:
+        assert type.kind == TypeKind.function
+        for fn in self.iter_function_defs(name):
+            if fn.type.function_def_args_identical(type):
+                raise ValueError(f"Redefinition of function {name}")
+        sym = self.put(name, checked=False)
+        sym.type = type
+        return sym
+
     def put_magic(self, name: str) -> Symbol:
         assert type(name) == str
         if self.lookup(name, shallow=True): raise ValueError(f"redefinition of magic sym: {name}")
         result = Symbol(self.module_graph.sym_id_gen.next(), name=name, magic=True)
         self._local_syms.append(result)
         return result
+
+    def put_magic_function(self, name: str, typ: Type) -> Symbol:
+        assert type(name) == str
+        sym = self.put_function(name, typ)
+        sym.magic = True
+        return sym
 
     def put_builtin_type(self, kind: TypeKind) -> Symbol:
         # TODO: Get rid of this hack
@@ -664,10 +713,9 @@ class CompCtx(lark.visitors.Interpreter):
         return NodeIfStmt(if_cond, if_body, else_body, self.get_unit_type()) # TODO: Pass along branch types once they exist
 
 
-    def block_stmt(self, tree: Tree, expected_type: Type, expression_mode=False):
+    def block_stmt(self, tree: Tree, expected_type: Type):
         self.current_scope = self.current_scope.make_child()
         if len(tree.children) == 0:
-            assert expected_type == None or expected_type.kind == TypeKind.unit
             return NodeBlockStmt(self.current_scope, self.get_unit_type())
 
         # Assume unit type if nothing is expected, fixed later
@@ -691,7 +739,7 @@ class CompCtx(lark.visitors.Interpreter):
         return result
     
     def block_expression(self, tree: Tree, expected_type: Type):
-        return self.block_stmt(tree, expected_type, expression_mode=True)
+        return self.block_stmt(tree, expected_type)
 
     def grouped_expression(self, tree: Tree, expected_type: Type):
         inner = self.visit(tree.children[0], expected_type)
@@ -964,15 +1012,12 @@ class CompCtx(lark.visitors.Interpreter):
         
         args_node = self.visit(tree.children[1], self.get_unit_type())
         assert isinstance(args_node, NodeFnParameters)
-        ret_type_node = None
-        ret_type = None
+        ret_type_node = NodeSymbol(self.get_unit_type().sym, self.get_unit_type())
+        ret_type = ret_type_node.type
         if tree.children[2] != None:
             ret_type_node = self.visit(tree.children[2], None)
             assert isinstance(ret_type_node, NodeSymbol)
             ret_type = ret_type_node.type # TODO: Fix this nonsense, type should be `type`, not whatever the type evaluates to
-        else:
-            ret_type = self.get_unit_type()
-
 
         # TODO: Use a type cache to load function with the same type from it for easier matching
         fn_type = Type(
@@ -982,19 +1027,19 @@ class CompCtx(lark.visitors.Interpreter):
         )
 
         # The sym must be created here to make recursive calls work without polluting the arg scope
-        sym = self.current_scope.parent.put(ident)
-        sym.type = fn_type
+        sym = self.current_scope.parent.put_function(ident, fn_type)
+        fn_type.sym = sym
 
         # TODO: Make this work for generics later
         self.fn_ret_type_stack.append(ret_type)
 
-        body_node: NodeBlockStmt = self.visit(tree.children[3], self.get_infer_type()) # TODO: once block expressions work, this should expect the return type
+        body_node: NodeBlockStmt = self.visit(tree.children[3], self.get_infer_type())
         assert isinstance(body_node, NodeBlockStmt)
 
         # TODO: Simplify checks, we can rely on the fact that it has to be transformed into `return x`
         if len(body_node.children) > 0:
             last_body_node = body_node.children[-1]
-            if last_body_node.type.kind == TypeKind.unit and not isinstance(last_body_node, NodeReturn):
+            if last_body_node.type.kind == TypeKind.unit and not expected_type.kind == TypeKind.unit and not isinstance(last_body_node, NodeReturn):
                 assert False, f"Returning a unit type for expected type {ret_type.render()} is not permitted"
             elif isinstance(last_body_node, NodeReturn):
                 pass # return is already checked
@@ -1006,9 +1051,12 @@ class CompCtx(lark.visitors.Interpreter):
                 body_node.children[-1] = NodeReturn(last_body_node, self.get_unit_type())
             else:
                 assert last_body_node.type.types_compatible(ret_type), f"Invalid return expression type {last_body_node.type.render()} for return type {ret_type.render()}"
-                body_node.children[-1] = NodeReturn(last_body_node, self.get_unit_type())
+                if last_body_node.type.kind == TypeKind.unit:
+                    body_node.children.append(NodeReturn(NodeEmpty(self.get_unit_type()), self.get_unit_type()))
+                else:
+                    body_node.children[-1] = NodeReturn(last_body_node, self.get_unit_type())
         else:
-            body_node.children.append(NodeReturn(NodeEmpty(self.get_unit_type())))
+            body_node.children.append(NodeReturn(NodeEmpty(self.get_unit_type()), self.get_unit_type()))
 
         self.fn_ret_type_stack.pop()
 
@@ -1023,9 +1071,31 @@ class CompCtx(lark.visitors.Interpreter):
 
     def fn_call_expr(self, tree: Tree, expected_type: Type):
         # TODO: Once overloads/methods are in, this must scan visible symbols and retrieve a list. Handled in identifier though
-        callee = self.visit(tree.children[0], None)
-
+        unresolved_args: list[Node] = []
+        if tree.children[1] != None:
+            # child 0 is None in empty calls i.e f()
+            if tree.children[1].children[0] is not None:
+                for i in range(0, len(tree.children[1].children)):
+                    unresolved_args.append(self.visit(tree.children[1].children[i], self.get_infer_type()))
+        
+        callee = None
+        if len(tree.children[0].children) > 0 and tree.children[0].children[0].data == "identifier":
+            # TODO: Better handling, use a candidate node instead
+            for fn in self.current_scope.iter_function_defs(tree.children[0].children[0].children[0].value):
+                if len(unresolved_args) != len(fn.type.function_arg_types()):
+                    continue
+                matches = True
+                for i in range(0, len(unresolved_args)):
+                    if not unresolved_args[i].type.types_compatible(fn.type.function_arg_types()[i]):
+                        matches = False
+                        break
+                if matches:
+                    callee = NodeSymbol(fn, fn.type)
+                    break
+        else:
+            callee = self.visit(tree.children[0], None)
         # TODO: allow non-symbol calls i.e. function pointers
+        assert callee != None, f"No matching overload found for {tree.children[0].children[0].children[0]}"
         assert isinstance(callee, NodeSymbol), "can only call symbols"
 
         arg_types = callee.symbol.type.data[0]
@@ -1151,8 +1221,9 @@ class ModuleGraph:
         magic_type = Type(TypeKind.magic, magic_sym)
         magic_sym.type = magic_type
 
-        dbg_sym = self.builtin_scope.put_magic("dbg")
-        dbg_sym.type = Type(TypeKind.function, dbg_sym, ([magic_type], NodeSymbol(unit_type_sym, unit_type_sym.type)))
+        dbg_sym_type = Type(TypeKind.function, None, ([magic_type], NodeSymbol(unit_type_sym, unit_type_sym.type)))
+        dbg_sym = self.builtin_scope.put_magic_function("dbg", dbg_sym_type)
+        dbg_sym_type.sym = dbg_sym
 
 
     def load(self, name: str, file_contents: str) -> Module:
