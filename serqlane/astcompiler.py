@@ -603,10 +603,20 @@ class CompCtx(lark.visitors.Interpreter):
         raise ValueError(f"{tree=}")
         return self.visit_children(tree, expected_type)
 
+    def check_reserved_keywords(self, tree):
+        if isinstance(tree, Tree):
+            if tree.data == 'identifier' and tree.children[0].value in RESERVED_KEYWORDS:
+                raise ValueError(f"Cannot use reserved keyword `{tree.children[0].value}` as a variable name")
+            for child in tree.children:
+                self.check_reserved_keywords(child)
+        elif isinstance(tree, Token):
+            if tree.type == 'identifier' and tree.value in RESERVED_KEYWORDS:
+                raise ValueError(f"Cannot use reserved keyword `{tree.value}` as a variable name")
 
     # new functions
     def statement(self, tree: Tree, expected_type: Type):
         assert len(tree.children) == 1, f"{len(tree.children)} --- {tree.children=}"
+        self.check_reserved_keywords(tree.children[0])
         return self.visit(tree.children[0], expected_type)
 
 

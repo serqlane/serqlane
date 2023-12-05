@@ -21,10 +21,19 @@ def test_let_reserved_keywords(executor, keyword):
         executor(f"let {keyword} = 1")
 
 @pytest.mark.parametrize("keyword", reserved_keywords)
-def test_fn_reserved_keywords(executor, keyword):
+def test_fn_name_reserved_keywords(executor, keyword):
     with pytest.raises(ValueError):
         code = f"""
         fn {keyword}() {{
-            return 
+            return
+        }}"""
+        executor(code)
+
+@pytest.mark.parametrize("keyword", reserved_keywords)
+def test_fn_args_reserved_keywords(executor, keyword):
+    with pytest.raises(ValueError):
+        code = f"""
+        fn test({keyword}: int) {{
+            return
         }}"""
         executor(code)
