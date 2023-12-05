@@ -533,6 +533,12 @@ class Scope:
         self.module_graph = graph # TODO: Get rid of builtin hack
 
     def iter_function_defs(self, name: str) -> Iterator[Symbol]:
+        # prefer magics
+        if self.module_graph.builtin_scope != self:
+            for sym in self.module_graph.builtin_scope.iter_function_defs(name):
+                if sym.name == name:
+                    yield sym
+
         for sym in self._local_syms:
             if sym.name == name:
                 yield sym
@@ -573,6 +579,7 @@ class Scope:
         return result
     
     def put_function(self, name: str, type: Type) -> Symbol:
+        assert type.kind == TypeKind.function
         for fn in self.iter_function_defs(name):
             if fn.type.function_def_args_identical(type):
                 raise ValueError(f"Redefinition of function {name}")
@@ -586,6 +593,12 @@ class Scope:
         result = Symbol(self.module_graph.sym_id_gen.next(), name=name, magic=True)
         self._local_syms.append(result)
         return result
+
+    def put_magic_function(self, name: str, typ: Type) -> Symbol:
+        assert type(name) == str
+        sym = self.put_function(name, typ)
+        sym.magic = True
+        return sym
 
     def put_builtin_type(self, kind: TypeKind) -> Symbol:
         # TODO: Get rid of this hack
@@ -1027,7 +1040,7 @@ class CompCtx(lark.visitors.Interpreter):
         # TODO: Simplify checks, we can rely on the fact that it has to be transformed into `return x`
         if len(body_node.children) > 0:
             last_body_node = body_node.children[-1]
-            if last_body_node.type.kind == TypeKind.unit and not isinstance(last_body_node, NodeReturn):
+            if last_body_node.type.kind == TypeKind.unit and not expected_type.kind == TypeKind.unit and not isinstance(last_body_node, NodeReturn):
                 assert False, f"Returning a unit type for expected type {ret_type.render()} is not permitted"
             elif isinstance(last_body_node, NodeReturn):
                 pass # return is already checked
@@ -1039,7 +1052,10 @@ class CompCtx(lark.visitors.Interpreter):
                 body_node.children[-1] = NodeReturn(last_body_node, self.get_unit_type())
             else:
                 assert last_body_node.type.types_compatible(ret_type), f"Invalid return expression type {last_body_node.type.render()} for return type {ret_type.render()}"
-                body_node.children[-1] = NodeReturn(last_body_node, self.get_unit_type())
+                if last_body_node.type.kind == TypeKind.unit:
+                    body_node.children.append(NodeReturn(NodeEmpty(self.get_unit_type()), self.get_unit_type()))
+                else:
+                    body_node.children[-1] = NodeReturn(last_body_node, self.get_unit_type())
         else:
             body_node.children.append(NodeReturn(NodeEmpty(self.get_unit_type()), self.get_unit_type()))
 
@@ -1206,8 +1222,9 @@ class ModuleGraph:
         magic_type = Type(TypeKind.magic, magic_sym)
         magic_sym.type = magic_type
 
-        dbg_sym = self.builtin_scope.put_magic("dbg")
-        dbg_sym.type = Type(TypeKind.function, dbg_sym, ([magic_type], NodeSymbol(unit_type_sym, unit_type_sym.type)))
+        dbg_sym_type = Type(TypeKind.function, None, ([magic_type], NodeSymbol(unit_type_sym, unit_type_sym.type)))
+        dbg_sym = self.builtin_scope.put_magic_function("dbg", dbg_sym_type)
+        dbg_sym_type.sym = dbg_sym
 
 
     def load(self, name: str, file_contents: str) -> Module:
