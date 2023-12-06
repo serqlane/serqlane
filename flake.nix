@@ -25,6 +25,14 @@
         python = pkgs.python312;
         pyproject = builtins.fromTOML (builtins.readFile ./pyproject.toml);
         packageName = "serqlane";
+
+        # js2py package doesn't build on 3.12
+        fixedLark = (python.pkgs.lark.override {
+          js2py = null;
+        }).overrideAttrs {
+          nativeCheckInputs = [];
+          doCheck = false;
+        };
       in {
         packages.${packageName} = python.pkgs.buildPythonPackage {
           src = ./.;
@@ -33,7 +41,7 @@
           format = "pyproject";
           pythonImportsCheck = [packageName];
           nativeBuildInputs = [python.pkgs.poetry-core];
-          propagatedBuildInputs = [python.pkgs.lark];
+          propagatedBuildInputs = [fixedLark];
           nativeCheckInputs = [python.pkgs.pytestCheckHook];
 
           meta.mainProgram = packageName;

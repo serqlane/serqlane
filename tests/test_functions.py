@@ -64,3 +64,64 @@ dbg(w)
 """
 
     assert capture_first_debug(code) == 4
+
+
+def test_function_empty_args(executor):
+    executor("""
+fn abc() {
+    return
+}
+abc()
+""")
+
+
+def test_function_call_symbol(executor):
+    with pytest.raises(AssertionError):
+        executor("""
+true()
+""")
+
+
+# code, expected
+overload_tests = [
+("""
+fn abc(a: int) -> int {
+    a
+}
+
+fn abc(a: string) -> string {
+    a
+}
+
+dbg(abc(1))
+""", 1),
+(
+"""
+fn abc() -> int {
+    1
+}
+
+fn abc(a: int) -> int {
+    a
+}
+
+dbg(abc())
+""", 1),
+(
+"""
+fn abc(a: int) -> int {
+    a
+}
+
+fn abc(a: int, b: string) -> int {
+    a
+}
+
+dbg(abc(1))
+""", 1) 
+]
+
+
+@pytest.mark.parametrize("code,expected", overload_tests)
+def test_overloads(capture_first_debug, code, expected):
+    assert capture_first_debug(code) == expected
