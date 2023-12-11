@@ -283,25 +283,3 @@ class SerqVM:
 
         self.enter_scope()
         self.execute_node(start)
-
-
-if __name__ == "__main__":
-    code = """
-let x = {
-    "1 + 1"
-}
-dbg(x)
-"""
-
-    import socket
-
-    if socket.gethostname() == "starrnix":
-        logger.setLevel(logging.DEBUG)
-        logger.addHandler(logging.StreamHandler())
-
-    graph = ModuleGraph()
-    module = graph.load("<string>", code)
-    #print(module.ast.render())
-
-    vm = SerqVM()
-    vm.execute_module(module)
