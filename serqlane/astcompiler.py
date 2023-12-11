@@ -313,17 +313,17 @@ class TypeKind(Enum):
     bool = auto()
     char = auto()
 
-    int8 = auto()
-    uint8 = auto()
-    int16 = auto()
-    uint16 = auto()
-    int32 = auto()
-    uint32 = auto()
-    int64 = auto()
-    uint64 = auto()
+    s8 = auto()
+    u8 = auto()
+    s16 = auto()
+    u16 = auto()
+    s32 = auto()
+    u32 = auto()
+    s64 = auto()
+    u64 = auto()
 
-    float32 = auto()
-    float64 = auto()
+    f32 = auto()
+    f64 = auto()
 
     pointer = auto() # native sized pointer
     reference = auto() # &T
@@ -342,19 +342,19 @@ class TypeKind(Enum):
     type = auto() # TODO: magic that holds a type itself, not yet in grammar
 
 int_types = frozenset([
-    TypeKind.int8,
-    TypeKind.uint8,
-    TypeKind.int16,
-    TypeKind.uint16,
-    TypeKind.int32,
-    TypeKind.uint32,
-    TypeKind.int64,
-    TypeKind.uint64,
+    TypeKind.s8,
+    TypeKind.u8,
+    TypeKind.s16,
+    TypeKind.u16,
+    TypeKind.s32,
+    TypeKind.u32,
+    TypeKind.s64,
+    TypeKind.u64,
 ])
 
 float_types = frozenset([
-    TypeKind.float32,
-    TypeKind.float64,
+    TypeKind.f32,
+    TypeKind.f64,
 ])
 
 literal_types = frozenset([
@@ -440,9 +440,9 @@ class Type:
                 return self.kind == other.kind
             case TypeKind.bool:
                 return self.kind == other.kind or other.kind == TypeKind.literal_bool    
-            case TypeKind.int8 | TypeKind.uint8 | TypeKind.int16 | TypeKind.uint16 | TypeKind.int32 | TypeKind.uint32 | TypeKind.int64 | TypeKind.uint64:
+            case TypeKind.s8 | TypeKind.u8 | TypeKind.s16 | TypeKind.u16 | TypeKind.s32 | TypeKind.u32 | TypeKind.s64 | TypeKind.u64:
                 return self.kind == other.kind or other.kind == TypeKind.literal_int
-            case TypeKind.float32 | TypeKind.float64:
+            case TypeKind.f32 | TypeKind.f64:
                 return self.kind == other.kind or other.kind == TypeKind.literal_float
             case TypeKind.string:
                 return self.kind == other.kind or other.kind == TypeKind.literal_string
@@ -1186,29 +1186,29 @@ class ModuleGraph:
         self.builtin_scope.put_builtin_type(TypeKind.bool)
         self.builtin_scope.put_builtin_type(TypeKind.char)
 
-        self.builtin_scope.put_builtin_type(TypeKind.int8)
-        self.builtin_scope.put_builtin_type(TypeKind.uint8)
-        self.builtin_scope.put_builtin_type(TypeKind.int16)
-        self.builtin_scope.put_builtin_type(TypeKind.uint16)
-        self.builtin_scope.put_builtin_type(TypeKind.int32)
-        self.builtin_scope.put_builtin_type(TypeKind.uint32)
-        self.builtin_scope.put_builtin_type(TypeKind.int64)
-        self.builtin_scope.put_builtin_type(TypeKind.uint64)
+        self.builtin_scope.put_builtin_type(TypeKind.s8)
+        self.builtin_scope.put_builtin_type(TypeKind.u8)
+        self.builtin_scope.put_builtin_type(TypeKind.s16)
+        self.builtin_scope.put_builtin_type(TypeKind.u16)
+        self.builtin_scope.put_builtin_type(TypeKind.s32)
+        self.builtin_scope.put_builtin_type(TypeKind.u32)
+        self.builtin_scope.put_builtin_type(TypeKind.s64)
+        self.builtin_scope.put_builtin_type(TypeKind.u64)
 
-        self.builtin_scope.put_builtin_type(TypeKind.float32)
-        self.builtin_scope.put_builtin_type(TypeKind.float64)
+        self.builtin_scope.put_builtin_type(TypeKind.f32)
+        self.builtin_scope.put_builtin_type(TypeKind.f64)
 
         self.builtin_scope.put_builtin_type(TypeKind.pointer)
 
         # TODO: hack
         native_int = self.builtin_scope.put_magic("int")
-        native_int.type = self.builtin_scope.lookup(TypeKind.int64.name).type
+        native_int.type = self.builtin_scope.lookup(TypeKind.s64.name).type
 
         native_uint = self.builtin_scope.put_magic("uint")
-        native_uint.type = self.builtin_scope.lookup(TypeKind.uint64.name).type
+        native_uint.type = self.builtin_scope.lookup(TypeKind.u64.name).type
 
         native_float = self.builtin_scope.put_magic("float")
-        native_float.type = self.builtin_scope.lookup(TypeKind.float64.name).type
+        native_float.type = self.builtin_scope.lookup(TypeKind.f64.name).type
         
         # TODO
         self.builtin_scope.put_builtin_type(TypeKind.string)
