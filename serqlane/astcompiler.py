@@ -403,6 +403,11 @@ free_infer_types = frozenset([
     TypeKind.infer,
 ])
 
+callable_types = frozenset([
+    TypeKind.function,
+    TypeKind.type,
+])
+
 
 # TODO: Add the other appropriate types
 builtin_userspace_types = frozenset(list(int_types) + list(float_types) + [TypeKind.bool, TypeKind.char, TypeKind.string, TypeKind.unit])
@@ -501,7 +506,7 @@ class Type:
                 raise ValueError("generic types aren't ready yet")
 
             case TypeKind.type | TypeKind.concrete_type:
-                if id(self) == id(other):
+                if id(self) == id(other): # TODO: It should NOT use python id, should use a concrete id or something. Need a type cache for that
                     return True
                 # TODO: If this fails even though the types should be the same the cache got messed up somehow
 
@@ -564,6 +569,9 @@ class Scope:
                     yield sym
 
         for sym in self._local_syms:
+            # TODO: Maybe split functions and types here? Also handle builtin types here, no reason they should be different
+            if sym.type.kind not in callable_types:
+                continue
             if sym.name == name:
                 yield sym
         if self.parent != None:
@@ -988,7 +996,7 @@ class CompCtx(lark.visitors.Interpreter):
         else:
             # infer type from value
             # TODO: Instantiate types, for now only literals            
-            if val_node.type.kind in builtin_userspace_types:
+            if val_node.type.kind in builtin_userspace_types or val_node.type.kind == TypeKind.type:
                 resolved_type = val_node.type
             else:
                 # Literals infer their own types to the default if told to do so
@@ -1149,40 +1157,50 @@ class CompCtx(lark.visitors.Interpreter):
         if len(tree.children[0].children) > 0 and tree.children[0].children[0].data == "identifier":
             # TODO: Better handling, use a candidate node instead
             for fn in self.current_scope.iter_function_defs(tree.children[0].children[0].children[0].value):
-                if len(unresolved_args) != len(fn.type.function_arg_types()):
-                    continue
-                matches = True
-                for i in range(0, len(unresolved_args)):
-                    if not unresolved_args[i].type.types_compatible(fn.type.function_arg_types()[i]):
-                        matches = False
-                        break
-                if matches:
+                if fn.type.kind == TypeKind.type:
+                    assert len(unresolved_args) == 0, "Calling a struct with arguments is not yet supported" # TODO 
                     callee = NodeSymbol(fn, fn.type)
                     break
+                else:
+                    if len(unresolved_args) != len(fn.type.function_arg_types()):
+                        continue
+                    matches = True
+                    for i in range(0, len(unresolved_args)):
+                        if not unresolved_args[i].type.types_compatible(fn.type.function_arg_types()[i]):
+                            matches = False
+                            break
+                    if matches:
+                        callee = NodeSymbol(fn, fn.type)
+                        break
         else:
             callee = self.visit(tree.children[0], None)
         # TODO: allow non-symbol calls i.e. function pointers
         assert callee != None, f"No matching overload found for {tree.children[0].children[0].children[0]}"
         assert isinstance(callee, NodeSymbol), "can only call symbols"
 
-        arg_types = callee.symbol.type.data[0]
-        ret_type_node = callee.symbol.type.data[1]
-        ret_type = None
-        if ret_type_node != None:
-            assert isinstance(ret_type_node, NodeSymbol), f"{ret_type_node=}"
-            ret_type = ret_type_node.type # TODO: Fix garbage type, should be a `type`, not evaluated type
-        else:
-            ret_type = self.current_scope.lookup_type("unit", shallow=True)
-
         params = []
-        if tree.children[1] != None:
-            # child 0 is None in empty calls i.e f()
-            if tree.children[1].children[0] is not None:
-                assert len(tree.children[1].children) == len(arg_types)
-                for i in range(0, len(arg_types)):
-                    params.append(self.visit(tree.children[1].children[i], arg_types[i]))
+        ret_type = None
+        if callee.type.kind == TypeKind.type:
+            ret_type = callee.type
         else:
-            assert len(arg_types) == 0
+            arg_types = callee.symbol.type.data[0]
+            ret_type_node = callee.symbol.type.data[1]
+            ret_type = None
+            if ret_type_node != None:
+                assert isinstance(ret_type_node, NodeSymbol), f"{ret_type_node=}"
+                ret_type = ret_type_node.type # TODO: Fix garbage type, should be a `type`, not evaluated type
+            else:
+                ret_type = self.current_scope.lookup_type("unit", shallow=True)
+
+            params = []
+            if tree.children[1] != None:
+                # child 0 is None in empty calls i.e f()
+                if tree.children[1].children[0] is not None:
+                    assert len(tree.children[1].children) == len(arg_types)
+                    for i in range(0, len(arg_types)):
+                        params.append(self.visit(tree.children[1].children[i], arg_types[i]))
+            else:
+                assert len(arg_types) == 0
 
         return NodeFnCall(
             callee=callee,
