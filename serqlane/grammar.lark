@@ -2,7 +2,7 @@ start: statement*
 
 
 // TODO: generics for both types and functions
-struct_definition: "type" identifier "{" [struct_field (_TERMINATOR struct_field)*] "}"
+struct_definition: "struct" identifier "{" [struct_field (_TERMINATOR struct_field)*] "}"
 struct_field: identifier user_type
 
 // rust terminology, wrong
