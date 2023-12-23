@@ -12,6 +12,9 @@ from lark import Token, Tree
 from serqlane.parser import SerqParser
 
 
+DEBUG = False
+
+
 RESERVED_KEYWORDS = [
     "and",
     "break",
@@ -250,7 +253,7 @@ class NodeStructDefinition(Node):
         self.fields = fields
 
     def render(self) -> str:
-        field_strs = "\n\t".join([x.render() for x in self.fields])
+        field_strs = "\n".join(["  " + x.render() for x in self.fields])
         return f"struct {self.sym.render()} {{\n{field_strs}\n}}"
 
 class NodeFnParameters(Node):
@@ -308,11 +311,13 @@ class Symbol:
         self.magic = magic
 
     def __repr__(self) -> str:
-        return self.render()
+        return self.render(debug=True)
 
-    def render(self) -> str:
+    def render(self, debug=DEBUG) -> str:
         # TODO: Use type info to render generics and others
-        return f"{self.name}_{self.id}"
+        if debug:
+            return f"{self.name}_{self.id}"
+        return self.name
 
 
 class TypeKind(Enum):
@@ -653,6 +658,12 @@ class CompCtx(lark.visitors.Interpreter):
         self.fn_ret_type_stack: list[Type] = []
         self.in_loop_counter = 0
 
+    def open_scope(self):
+        self.current_scope = self.current_scope.make_child()
+
+    def close_scope(self):
+        self.current_scope = self.current_scope.parent
+
     def get_infer_type(self) -> Type:
         return Type(kind=TypeKind.infer, sym=None)
 
@@ -739,7 +750,7 @@ class CompCtx(lark.visitors.Interpreter):
 
 
     def block_stmt(self, tree: Tree, expected_type: Type):
-        self.current_scope = self.current_scope.make_child()
+        self.open_scope()
         if len(tree.children) == 0:
             return NodeBlockStmt(self.current_scope, self.get_unit_type())
 
@@ -760,7 +771,7 @@ class CompCtx(lark.visitors.Interpreter):
             result.add(self.visit(last_child, None))
             result.type = result.children[-1].type
 
-        self.current_scope = self.current_scope.parent
+        self.close_scope()
         return result
     
     def block_expression(self, tree: Tree, expected_type: Type):
@@ -1022,17 +1033,16 @@ class CompCtx(lark.visitors.Interpreter):
         assert expected_type.kind == TypeKind.unit
         ident = tree.children[0].children[0].value
         sym = self.current_scope.put_type(ident)
-        sym.definition_node 
 
         fields = []
         if tree.children[1] != None:
-            prev_scope = self.current_scope.make_child()
+            self.open_scope()
             for field_node in tree.children[1:]:
                 # TODO: Recursion check. Recursion is currently unrestricted and permits infinite recursion
                 #   For proper recursion handling we also gotta ensure we don't try to access a type that is currently being processed like will be the case with mutual recursion
                 field = self.visit(field_node, self.get_unit_type())
                 fields.append(field)
-            self.current_scope = prev_scope
+            self.close_scope()
 
         def_node = NodeStructDefinition(sym, fields, self.get_unit_type())
         sym.definition_node = def_node
@@ -1065,8 +1075,7 @@ class CompCtx(lark.visitors.Interpreter):
         ident = ident_node.children[0].value
 
         # must open a scope here to isolate the params
-        fn_scope = self.current_scope.make_child()
-        self.current_scope = fn_scope
+        self.open_scope()
         
         args_node = self.visit(tree.children[1], self.get_unit_type())
         assert isinstance(args_node, NodeFnParameters)
@@ -1118,8 +1127,7 @@ class CompCtx(lark.visitors.Interpreter):
 
         self.fn_ret_type_stack.pop()
 
-        # restore scope
-        self.current_scope = fn_scope.parent
+        self.close_scope()
 
         sym.type = fn_type
 
