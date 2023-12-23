@@ -94,7 +94,7 @@ class NodeLet(Node):
 
     def render(self) -> str:
         is_mut = self.sym_node.symbol.mutable
-        return f"let {"mut " if is_mut else ""}{self.sym_node.render()}{": " + self.sym_node.type.render()} = {self.expr.render()}"
+        return f"let {"mut " if is_mut else ""}{self.sym_node.render()}{": " + self.sym_node.type.sym.render()} = {self.expr.render()}"
 
 class NodeAssignment(Node):
     def __init__(self, lhs: Node, rhs: Node, type: Type) -> None:
@@ -235,6 +235,24 @@ class NodeReturn(Node):
     def render(self) -> str:
         return f"return {self.expr.render()}"
 
+class NodeStructField(Node):
+    def __init__(self, sym: Symbol, typ: Type) -> None:
+        super().__init__(typ)
+        self.sym = sym
+
+    def render(self) -> str:
+        return f"{self.sym.render()}: {self.type.sym.render()}"
+
+class NodeStructDefinition(Node):
+    def __init__(self, sym: Symbol, fields: list[NodeStructDefinition], type: Type) -> None:
+        super().__init__(type)
+        self.sym = sym
+        self.fields = fields
+
+    def render(self) -> str:
+        field_strs = "\n\t".join([x.render() for x in self.fields])
+        return f"struct {self.sym.render()} {{\n{field_strs}\n}}"
+
 class NodeFnParameters(Node):
     def __init__(self, args: list[tuple[NodeSymbol, Node]]):
         """
@@ -244,7 +262,7 @@ class NodeFnParameters(Node):
         self.args = args
 
     def render(self) -> str:
-        return ", ".join([x[0].render() + ": " + x[1].type.render() for x in self.args])
+        return ", ".join([x[0].render() + ": " + x[1].type.sym.render() for x in self.args])
 
 class NodeFnDefinition(Node):
     def __init__(self, sym: Symbol, params: NodeFnParameters, body: NodeBlockStmt, type: Type) -> None:
@@ -256,7 +274,7 @@ class NodeFnDefinition(Node):
         self.body = body
 
     def render(self) -> str:
-        return f"fn {self.sym.render()}({self.params.render()}): {self.sym.type.data[1].symbol.type.render()} {self.body.render()}"
+        return f"fn {self.sym.render()}({self.params.render()}) -> {self.sym.type.data[1].symbol.render()} {self.body.render()}"
 
 class NodeFnCall(Node):
     def __init__(self, callee: Node, args: list[Node], type: Type) -> None:
@@ -519,11 +537,13 @@ class Type:
         # TODO: match on sets?
         if self.kind in builtin_userspace_types or self.kind in literal_types:
             return self.kind.name
-        if self.kind == TypeKind.function:
+        elif self.kind == TypeKind.function:
             args = ", ".join([x.render() for x in self.data[0]])
             return f"fn({args}): {self.data[1].render()}"
+        elif self.kind == TypeKind.type:
+            return self.sym.definition_node.render()
         else:
-            raise NotImplementedError()
+            raise NotImplementedError(self)
 
 
 class Scope:
@@ -604,6 +624,11 @@ class Scope:
         # TODO: Get rid of this hack
         sym = self.put_magic(kind.name)
         sym.type = Type(kind=kind, sym=sym)
+        return sym
+    
+    def put_type(self, name: str) -> Symbol:
+        sym = self.put(name)
+        sym.type = Type(kind=TypeKind.type, sym=sym)
         return sym
 
     def put_let(self, name: str, mutable=False, checked=True, shallow=False) -> Symbol:
@@ -729,7 +754,7 @@ class CompCtx(lark.visitors.Interpreter):
 
         if expected_type != None:
             result.add(self.visit(last_child, expected_type))
-            assert expected_type.types_compatible(result.children[-1].type), f"Expected type {expected_type.render()} for block but got {result.children[-1].type.render()}"
+            assert expected_type.types_compatible(result.children[-1].type), f"Expected type {expected_type.sym.render()} for block but got {result.children[-1].type.sym.render()}"
             result.type = result.children[-1].type
         elif len(result.children) > 0:
             result.add(self.visit(last_child, None))
@@ -790,7 +815,7 @@ class CompCtx(lark.visitors.Interpreter):
         # TODO: Dot expr
         if not lhs.type.types_compatible(rhs.type):
             # TODO: Error reporting
-            raise ValueError(f"Incompatible values in binary expression: `{lhs.render()}`:{lhs.type.render()} {op} `{rhs.render()}`:{rhs.type.render()}")
+            raise ValueError(f"Incompatible values in binary expression: `{lhs.render()}`:{lhs.render()} {op} `{rhs.type.sym.render()}`:{rhs.type.sym.render()}")
         
         # Type coercion. Revisits "broken" nodes and tries to apply the new info on them 
         # TODO: Parts of this should probably be pulled into a new function
@@ -944,7 +969,7 @@ class CompCtx(lark.visitors.Interpreter):
             # check types for compatibility
             if not val_node.type.types_compatible(resolved_type):
                 # TODO: Error reporting
-                raise ValueError(f"Variable type {type_sym.symbol.name} is not compatible with value of type {val_node.type.render()}")
+                raise ValueError(f"Variable type {type_sym.symbol.name} is not compatible with value of type {val_node.type.sym.render()}")
             else:
                 assert val_node.type.kind not in literal_types
             # no need to resem the node, it should already be with the current type resolution
@@ -977,8 +1002,41 @@ class CompCtx(lark.visitors.Interpreter):
             expr = self.visit(tree.children[0], self.fn_ret_type_stack[-1])
         else:
             expr = NodeEmpty(self.fn_ret_type_stack[-1])        
-        assert self.fn_ret_type_stack[-1].types_compatible(expr.type), f"Incompatible return({expr.type.render()}) for function type({self.fn_ret_type_stack[-1].render()})"
+        assert self.fn_ret_type_stack[-1].types_compatible(expr.type), f"Incompatible return({expr.type.sym.render()}) for function type({self.fn_ret_type_stack[-1].render()})"
         return NodeReturn(expr=expr, type=self.get_unit_type())
+
+    def struct_field(self, tree: Tree, expected_type: Type):
+        assert expected_type.kind == TypeKind.unit
+
+        ident = tree.children[0].children[0].value
+        sym = self.current_scope.put_let(ident, checked=True, shallow=True)
+
+        typ_sym_node = self.visit(tree.children[1], None)
+        assert isinstance(typ_sym_node, NodeSymbol) # TODO: Assert that this is actually a type sym. Current system isn't ready yet
+
+        sym.type = typ_sym_node.type
+
+        return NodeStructField(sym, typ_sym_node.symbol.type)
+
+    def struct_definition(self, tree: Tree, expected_type: Type):
+        assert expected_type.kind == TypeKind.unit
+        ident = tree.children[0].children[0].value
+        sym = self.current_scope.put_type(ident)
+        sym.definition_node 
+
+        fields = []
+        if tree.children[1] != None:
+            prev_scope = self.current_scope.make_child()
+            for field_node in tree.children[1:]:
+                # TODO: Recursion check. Recursion is currently unrestricted and permits infinite recursion
+                #   For proper recursion handling we also gotta ensure we don't try to access a type that is currently being processed like will be the case with mutual recursion
+                field = self.visit(field_node, self.get_unit_type())
+                fields.append(field)
+            self.current_scope = prev_scope
+
+        def_node = NodeStructDefinition(sym, fields, self.get_unit_type())
+        sym.definition_node = def_node
+        return def_node
 
     def fn_definition_args(self, tree: Tree, expected_type: Type):
         assert expected_type.kind == TypeKind.unit
@@ -1040,17 +1098,17 @@ class CompCtx(lark.visitors.Interpreter):
         if len(body_node.children) > 0:
             last_body_node = body_node.children[-1]
             if last_body_node.type.kind == TypeKind.unit and not expected_type.kind == TypeKind.unit and not isinstance(last_body_node, NodeReturn):
-                assert False, f"Returning a unit type for expected type {ret_type.render()} is not permitted"
+                assert False, f"Returning a unit type for expected type {ret_type.sym.render()} is not permitted"
             elif isinstance(last_body_node, NodeReturn):
                 pass # return is already checked
             elif last_body_node.type.kind in literal_types:
                 body_node = self.visit(tree.children[3], ret_type)
                 last_body_node = body_node.children[-1]
                 if last_body_node.type.kind in builtin_userspace_types:
-                    assert last_body_node.type.types_compatible(ret_type), f"Invalid return expression type {last_body_node.type.render()} for return type {ret_type.render()}"
+                    assert last_body_node.type.types_compatible(ret_type), f"Invalid return expression type {last_body_node.type.sym.render()} for return type {ret_type.sym.render()}"
                 body_node.children[-1] = NodeReturn(last_body_node, self.get_unit_type())
             else:
-                assert last_body_node.type.types_compatible(ret_type), f"Invalid return expression type {last_body_node.type.render()} for return type {ret_type.render()}"
+                assert last_body_node.type.types_compatible(ret_type), f"Invalid return expression type {last_body_node.type.sym.render()} for return type {ret_type.sym.render()}"
                 if last_body_node.type.kind == TypeKind.unit:
                     body_node.children.append(NodeReturn(NodeEmpty(self.get_unit_type()), self.get_unit_type()))
                 else:

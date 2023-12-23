@@ -3,7 +3,7 @@ start: statement*
 
 // TODO: generics for both types and functions
 struct_definition: "struct" identifier "{" [struct_field (_TERMINATOR struct_field)*] "}"
-struct_field: identifier user_type
+struct_field: identifier user_type // TODO: default values
 
 // rust terminology, wrong
 enum_definition: "enum" identifier "{" [enum_field ((_TERMINATOR | ",") enum_field)*] "}"
@@ -22,7 +22,7 @@ fn_call_expr: expression fn_call_args
 fn_call_args: "(" [expression ("," expression)*] ")"
 
 
-statement: ((return_stmt | break_stmt | continue_stmt | expression | assignment | let_stmt) _TERMINATOR) | (fn_definition | block_stmt | while_stmt | if_stmt)
+statement: ((return_stmt | break_stmt | continue_stmt | expression | assignment | let_stmt) _TERMINATOR) | ( struct_definition | enum_definition | alias_definition | distinct_definition | fn_definition | block_stmt | while_stmt | if_stmt)
 
 // For now just identifier. Later should be a generic[T] expression that handles function types and others as well
 _type: identifier // TODO: Make it visible; get rid of _ for that
