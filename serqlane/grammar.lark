@@ -85,7 +85,8 @@ identifier: /[a-zA-Z](\w|\d)*/
 ?number: integer | decimal
 integer: /\d+/
 decimal: /\d+\.\d+/
-string: "\"" /[^"]+/? "\""
+string: "\"" string_inner? "\""
+?string_inner: /((\\\"|[^\"])+)/
 // TODO: char
 
 _TERMINATOR: /\n/ 
