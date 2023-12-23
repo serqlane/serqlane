@@ -197,9 +197,8 @@ class NodeContinue(Node):
 
 
 class NodeBlockStmt(NodeStmtList):
-    def __init__(self, scope: Scope, type: Type) -> None:
+    def __init__(self, type: Type) -> None:
         super().__init__(type)
-        self.scope = scope # TODO: Should this actually be stored?
 
     def render(self) -> str:
         inner = super().render()
@@ -745,18 +744,18 @@ class CompCtx(lark.visitors.Interpreter):
             assert isinstance(else_body, NodeBlockStmt)
         else:
             # Always inject an empty else case if none is provided
-            else_body = NodeBlockStmt(self.current_scope.make_child(), self.get_unit_type())
+            else_body = NodeBlockStmt(self.get_unit_type())
         return NodeIfStmt(if_cond, if_body, else_body, self.get_unit_type()) # TODO: Pass along branch types once they exist
 
 
     def block_stmt(self, tree: Tree, expected_type: Type):
         self.open_scope()
         if len(tree.children) == 0:
-            return NodeBlockStmt(self.current_scope, self.get_unit_type())
+            return NodeBlockStmt(self.get_unit_type())
 
         # Assume unit type if nothing is expected, fixed later
         # Have to be very careful with symbols, we do not want to use one that only exists later
-        result = NodeBlockStmt(self.current_scope, expected_type if expected_type != None else self.get_unit_type())
+        result = NodeBlockStmt(expected_type if expected_type != None else self.get_unit_type())
 
         (tree_children, last_child) = (tree.children[0:len(tree.children)-1], tree.children[-1])
         for child in tree_children:
@@ -826,7 +825,9 @@ class CompCtx(lark.visitors.Interpreter):
         # TODO: Dot expr
         if not lhs.type.types_compatible(rhs.type):
             # TODO: Error reporting
-            raise ValueError(f"Incompatible values in binary expression: `{lhs.render()}`:{lhs.render()} {op} `{rhs.type.sym.render()}`:{rhs.type.sym.render()}")
+            tl = lhs.type.instantiate_literal(self.graph) if lhs.type.kind in literal_types else lhs.type
+            tr = rhs.type.instantiate_literal(self.graph) if rhs.type.kind in literal_types else rhs.type
+            raise ValueError(f"Incompatible values in binary expression: `{lhs.render()}`:{lhs.render()} {op} `{tl.sym.render()}`:{tr.sym.render()}")
         
         # Type coercion. Revisits "broken" nodes and tries to apply the new info on them 
         # TODO: Parts of this should probably be pulled into a new function
