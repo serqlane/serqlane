@@ -91,7 +91,7 @@ class SerqVM:
 
         fields: list[tuple[str, ctypes._SimpleCData]] = []
         for field in struct.fields:
-            field_name = field.sym.name
+            field_name = field.sym.qualified_name()
             match field.type.kind:
                 case TypeKind.type:
                     try:
@@ -237,7 +237,7 @@ class SerqVM:
 
             case NodeDotAccess():
                 left = self.eval(expression.lhs)
-                return getattr(left, expression.rhs.name)
+                return getattr(left, expression.rhs.qualified_name())
 
             case _:
                 raise NotImplementedError(f"{expression=}")
@@ -281,7 +281,7 @@ class SerqVM:
                     assert isinstance(child.lhs, (NodeSymbol, NodeDotAccess)), f"{type(child.lhs)=}"
 
                     if isinstance(child.lhs, NodeDotAccess):
-                        setattr(self.eval(child.lhs.lhs), child.lhs.rhs.name, self.eval(child.rhs))
+                        setattr(self.eval(child.lhs.lhs), child.lhs.rhs.qualified_name(), self.eval(child.rhs))
                     else:
                         self.set_value_on_stack(child.lhs.symbol, self.eval(child.rhs))
 

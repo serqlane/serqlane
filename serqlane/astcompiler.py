@@ -314,6 +314,9 @@ class Symbol:
         self.definition_node: Node = None
         self.magic = magic
 
+    def qualified_name(self):
+        return self.name + self.id
+
     def __repr__(self) -> str:
         return self.render(debug=True)
 
