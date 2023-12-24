@@ -239,6 +239,9 @@ class SerqVM:
                 left = self.eval(expression.lhs)
                 return getattr(left, expression.rhs.qualified_name())
 
+            case NodeAliasDefinition():
+                return expression.src
+
             case _:
                 raise NotImplementedError(f"{expression=}")
 
