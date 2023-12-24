@@ -32,7 +32,7 @@ return_user_type: "->" _type
 
 let_stmt: "let" MUT? identifier user_type? "=" expression
 MUT: "mut"
-assignment: identifier "=" expression
+assignment: expression "=" expression
 
 return_stmt: "return" [expression]
 break_stmt: "break"
@@ -71,7 +71,7 @@ expression or expression
 | expression star expression
 | expression slash expression
 
-| expression dot expression
+| expression dot identifier
 // highest precedence
 
 

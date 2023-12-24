@@ -124,10 +124,6 @@ class NodeBinaryExpr(Node):
         self.lhs = lhs
         self.rhs = rhs
 
-class NodeDotExpr(NodeBinaryExpr):
-    def render(self) -> str:
-        return f"({self.lhs.render()}.{self.rhs.render()})"
-
 # TODO: These could be converted into (infix) functions to be stored as op(lhs, rhs) in reimpl
 # arith
 class NodePlusExpr(NodeBinaryExpr):
@@ -184,6 +180,15 @@ class NodeGreaterExpression(NodeBinaryExpr):
 class NodeGreaterEqualsExpression(NodeBinaryExpr):
     def render(self) -> str:
         return f"({self.lhs.render()} >= {self.rhs.render()})"
+
+class NodeDotAccess(Node):
+    def __init__(self, lhs: Symbol, rhs: Symbol) -> None:
+        super().__init__(rhs.type)
+        self.lhs = lhs
+        self.rhs = rhs
+
+    def render(self) -> str:
+        return f"{self.lhs.render()}.{self.rhs.render()}"
 
 
 # others
@@ -828,46 +833,48 @@ class CompCtx(lark.visitors.Interpreter):
         lhs = self.visit(tree.children[0], None)
         # TODO: Can the symbol be captured somehow?
         op = tree.children[1].data.value
-        rhs = self.visit(tree.children[2], None)
+        # a dot expression does not work by the same type rules
+        if op != "dot":
+            rhs = self.visit(tree.children[2], None)
 
-        # TODO: Dot expr
-        if not lhs.type.types_compatible(rhs.type):
-            # TODO: Error reporting
-            tl = lhs.type.instantiate_literal(self.graph) if lhs.type.kind in literal_types else lhs.type
-            tr = rhs.type.instantiate_literal(self.graph) if rhs.type.kind in literal_types else rhs.type
-            raise ValueError(f"Incompatible values in binary expression: `{lhs.render()}`:{lhs.render()} {op} `{tl.sym.render()}`:{tr.sym.render()}")
-        
-        # Type coercion. Revisits "broken" nodes and tries to apply the new info on them 
-        # TODO: Parts of this should probably be pulled into a new function
-        expr_type: Type = lhs.type if lhs.type.kind not in literal_types else rhs.type
-
-        # if there is a known type, spread it around
-        if lhs.type.kind in literal_types and rhs.type.kind not in literal_types:
-            lhs = self.visit(tree.children[0], rhs.type)
-        elif rhs.type.kind in literal_types and lhs.type.kind not in literal_types:
-            rhs = self.visit(tree.children[2], lhs.type)
-        
-        # both literal
-        else:
-            # if possible we ask for help from expected_type
-            if expected_type != None and expr_type.types_compatible(expected_type):
-                lhs = self.visit(tree.children[0], expected_type)
-                rhs = self.visit(tree.children[2], expected_type)
-                assert lhs.type.types_compatible(rhs.type)
-                expr_type = lhs.type
-
-            # no expectation, let them infer their own types
-            elif expected_type == None:
-                lhs = self.visit(tree.children[0], self.get_infer_type())
-                rhs = self.visit(tree.children[2], self.get_infer_type())
-                assert lhs.type.types_compatible(rhs.type)
-                expr_type = lhs.type
+            # TODO: Dot expr
+            if not lhs.type.types_compatible(rhs.type):
+                # TODO: Error reporting
+                tl = lhs.type.instantiate_literal(self.graph) if lhs.type.kind in literal_types else lhs.type
+                tr = rhs.type.instantiate_literal(self.graph) if rhs.type.kind in literal_types else rhs.type
+                raise ValueError(f"Incompatible values in binary expression: `{lhs.render()}`:{lhs.render()} {op} `{tl.sym.render()}`:{tr.sym.render()}")
             
-            # there is an expected type but the expression isn't compatible with it
+            # Type coercion. Revisits "broken" nodes and tries to apply the new info on them 
+            # TODO: Parts of this should probably be pulled into a new function
+            expr_type: Type = lhs.type if lhs.type.kind not in literal_types else rhs.type
+
+            # if there is a known type, spread it around
+            if lhs.type.kind in literal_types and rhs.type.kind not in literal_types:
+                lhs = self.visit(tree.children[0], rhs.type)
+            elif rhs.type.kind in literal_types and lhs.type.kind not in literal_types:
+                rhs = self.visit(tree.children[2], lhs.type)
+            
+            # both literal
             else:
-                # Assume it's fine, it should be checked outside of here
-                pass
-                #assert False, f"{expected_type.kind=}    {expr_type.kind}"
+                # if possible we ask for help from expected_type
+                if expected_type != None and expr_type.types_compatible(expected_type):
+                    lhs = self.visit(tree.children[0], expected_type)
+                    rhs = self.visit(tree.children[2], expected_type)
+                    assert lhs.type.types_compatible(rhs.type)
+                    expr_type = lhs.type
+
+                # no expectation, let them infer their own types
+                elif expected_type == None:
+                    lhs = self.visit(tree.children[0], self.get_infer_type())
+                    rhs = self.visit(tree.children[2], self.get_infer_type())
+                    assert lhs.type.types_compatible(rhs.type)
+                    expr_type = lhs.type
+                
+                # there is an expected type but the expression isn't compatible with it
+                else:
+                    # Assume it's fine, it should be checked outside of here
+                    pass
+                    #assert False, f"{expected_type.kind=}    {expr_type.kind}"
 
         match op:
             case "plus":
@@ -915,7 +922,20 @@ class CompCtx(lark.visitors.Interpreter):
 
             case "dot":
                 # TODO: Has to use the type of rhs for node type, can only be done once types and field lookup exist
-                raise ValueError("Dot expressions are not ready")
+                lhs = self.visit(tree.children[0], None)
+                assert lhs.type.kind == TypeKind.type, f"Dot operations for type {lhs.type.sym.render()} are not yet allowed" # TODO: Allow any type here, required for universal function calling syntax
+                rhs = tree.children[2].children[0].value
+
+                assert isinstance(lhs.type.sym.definition_node, NodeStructDefinition), "Dot operations are currently only ready for structs"
+                matching_field_sym = None
+                # TODO: Do a scope-esque lookup instead. Things like inheritance may silently add more things later
+                for field in lhs.type.sym.definition_node.fields:
+                    if field.sym.name == rhs:
+                        matching_field_sym = field.sym
+                        break
+                assert matching_field_sym != None, f"Could not find {rhs} for {lhs.type.sym.render()}"
+
+                return NodeDotAccess(lhs, matching_field_sym)
             case _:
                 raise ValueError(f"Unimplemented binary op: {op}")
 
@@ -944,10 +964,20 @@ class CompCtx(lark.visitors.Interpreter):
         rhs = self.visit(tree.children[1], lhs.type)
         assert lhs.type.types_compatible(rhs.type)
 
+        def report_immutable():
+            raise ValueError(f"{lhs.symbol.name} is not mutable")
+
         match lhs:
             case NodeSymbol():
                 if not lhs.symbol.mutable:
-                    raise ValueError(f"{lhs.symbol.name} is not mutable")
+                    report_immutable()
+            case NodeDotAccess():
+                leftmost = lhs.lhs
+                while isinstance(leftmost, NodeDotAccess):
+                    leftmost = leftmost.lhs
+                assert isinstance(leftmost, NodeSymbol)
+                if not leftmost.symbol.mutable:
+                    report_immutable()
             case _:
                 raise NotImplementedError
         
