@@ -242,6 +242,15 @@ class NodeReturn(Node):
     def render(self) -> str:
         return f"return {self.expr.render()}"
 
+class NodeAliasDefinition(Node):
+    def __init__(self, sym: Symbol, src: Symbol, type: Type) -> None:
+        super().__init__(type)
+        self.sym = sym
+        self.src = src
+
+    def render(self) -> str:
+        return f"alias {self.sym.render()} = {self.src.render()}"
+
 class NodeStructField(Node):
     def __init__(self, sym: Symbol, typ: Type) -> None:
         super().__init__(typ)
@@ -1057,6 +1066,24 @@ class CompCtx(lark.visitors.Interpreter):
             expr = NodeEmpty(self.fn_ret_type_stack[-1])        
         assert self.fn_ret_type_stack[-1].types_compatible(expr.type), f"Incompatible return({expr.type.sym.render()}) for function type({self.fn_ret_type_stack[-1].render()})"
         return NodeReturn(expr=expr, type=self.get_unit_type())
+
+    def alias_definition(self, tree: Tree, expected_type: Type):
+        assert expected_type.kind == TypeKind.unit
+
+        src = self.visit(tree.children[1], None)
+        assert isinstance(src, NodeSymbol)
+
+        alias_name = tree.children[0].children[0].value
+        alias_sym = self.current_scope.put(alias_name)
+        alias_sym.type = src.type
+        alias_sym.mutable = src.symbol.mutable
+        alias_sym.magic = src.symbol.magic
+        # TODO: Exporting aliases
+        # alias_sym.exported = ...
+
+        res_node = NodeAliasDefinition(alias_sym, src.symbol, self.get_unit_type())
+        alias_sym.definition_node = res_node
+        return res_node
 
     def struct_field(self, tree: Tree, expected_type: Type):
         assert expected_type.kind == TypeKind.unit
