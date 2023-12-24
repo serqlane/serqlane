@@ -30,10 +30,18 @@ RESERVED_KEYWORDS = [
     "while",
 ]
 
+class LineInfo:
+    def __init__(self, line: int, line_end: int, column: int, column_end: int):
+        self.line = line
+        self.line_end = line_end
+        self.column = column
+        self.column_end = column_end
+
 class Node:
     def __init__(self, type: Type) -> None:
         assert type != None and isinstance(type, Type)
         self.type = type
+        self.lineinfo: Optional[LineInfo] = None
 
     def render(self) -> str:
         raise NotImplementedError(f"{type(self)}")

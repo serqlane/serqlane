@@ -13,7 +13,7 @@ class SerqParser:
         with open(grammar_file) as fp:
             grammar = fp.read()
 
-        self.lark = Lark(grammar)
+        self.lark = Lark(grammar, propagate_positions=True)
 
     def parse(self, entry: str, display: bool = False):
         if not entry.endswith("\n"):
