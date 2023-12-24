@@ -23,3 +23,12 @@ def test_fn_args_reserved_keywords(executor, keyword):
             return
         }}"""
         executor(code)
+
+@pytest.mark.parametrize("keyword", RESERVED_KEYWORDS)
+def test_struct_name_reserved_keywords(executor, keyword):
+    with pytest.raises(ValueError):
+        code = f"""
+        struct {keyword} {{
+            a: int
+        }}"""
+        executor(code)
