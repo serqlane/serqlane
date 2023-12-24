@@ -8,6 +8,7 @@ import textwrap
 
 import lark.visitors
 from lark import Token, Tree
+from lark.tree import Meta
 
 from serqlane.parser import SerqParser
 
@@ -42,6 +43,14 @@ class Node:
         assert type != None and isinstance(type, Type)
         self.type = type
         self.lineinfo: Optional[LineInfo] = None
+
+    def fill_lineinfo_from_lark_meta(self, meta: Meta):
+        self.lineinfo = LineInfo(
+            line=meta.line,
+            line_end=meta.end_line,
+            column=meta.column,
+            column_end=meta.end_column,
+        )
 
     def render(self) -> str:
         raise NotImplementedError(f"{type(self)}")
@@ -1046,11 +1055,15 @@ class CompCtx(lark.visitors.Interpreter):
         sym = self.current_scope.put_let(ident, mutable=is_mut)
         sym.type = resolved_type
         sym = NodeSymbol(sym, sym.type)
-        return NodeLet(
+        sym.fill_lineinfo_from_lark_meta(ident_node.meta)
+        res_node = NodeLet(
             sym_node=sym,
             expr=val_node,
             type=self.get_unit_type()
         )
+        res_node.fill_lineinfo_from_lark_meta(tree.meta)
+        sym.symbol.definition_node = res_node
+        return res_node
 
     def return_stmt(self, tree: Tree, expected_type: Type):
         assert len(self.fn_ret_type_stack) > 0, "Return outside of a function"
@@ -1074,7 +1087,9 @@ class CompCtx(lark.visitors.Interpreter):
 
         sym.type = typ_sym_node.type
 
-        return NodeStructField(sym, typ_sym_node.symbol.type)
+        res_node = NodeStructField(sym, typ_sym_node.symbol.type)
+        res_node.fill_lineinfo_from_lark_meta(tree.meta)
+        return res_node
 
     def struct_definition(self, tree: Tree, expected_type: Type):
         assert expected_type.kind == TypeKind.unit
@@ -1092,6 +1107,7 @@ class CompCtx(lark.visitors.Interpreter):
             self.close_scope()
 
         def_node = NodeStructDefinition(sym, fields, self.get_unit_type())
+        def_node.fill_lineinfo_from_lark_meta(tree.meta)
         sym.definition_node = def_node
         return def_node
 
@@ -1110,7 +1126,9 @@ class CompCtx(lark.visitors.Interpreter):
             sym = self.current_scope.put_let(ident, shallow=True) # effectively a let that permits shallow shadowing
             type_node = self.visit(child.children[1], None)
             sym.type = type_node.symbol.type # TODO: This is not clean at all
-            params.append((NodeSymbol(sym, sym.type), type_node))
+            sym_node = NodeSymbol(sym, sym.type)
+            sym_node.fill_lineinfo_from_lark_meta(tree.meta)
+            params.append((sym_node, type_node))
 
         return NodeFnParameters(params)
 
@@ -1179,6 +1197,7 @@ class CompCtx(lark.visitors.Interpreter):
         sym.type = fn_type
 
         res = NodeFnDefinition(sym, args_node, body_node, self.get_unit_type())
+        res.fill_lineinfo_from_lark_meta(tree.meta)
         sym.definition_node = res
         return res
 
