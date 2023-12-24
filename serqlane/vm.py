@@ -1,3 +1,4 @@
+import ctypes
 import logging
 import operator
 from collections.abc import Callable
@@ -25,6 +26,14 @@ class ReturnError(SerqVMError):
     def __init__(self, value: Any) -> None:
         super().__init__()
         self.value = value
+
+
+class DiagnosticError(SerqVMError):
+    ...
+
+
+class StructNotDefined(DiagnosticError):
+    ...
 
 
 class Register:
@@ -64,11 +73,46 @@ class Unit:
     ...
 
 
+SERQ_TO_C_TYPE = {
+    TypeKind.int32: ctypes.c_int32,
+    TypeKind.float32: ctypes.c_float,
+    TypeKind.int64: ctypes.c_int64,
+    TypeKind.float64: ctypes.c_double,
+}
+
+
 class SerqVM:
     def __init__(self, *, debug_hook: Callable[[Any], None] | None = None) -> None:
         self.debug_hook = debug_hook
-
         self.stack: list[dict[Symbol, Any]] = []
+
+    def construct_serq_struct(self, struct: NodeStructDefinition):
+        name = struct.sym.name
+
+        fields: list[tuple[str, ctypes._SimpleCData]] = []
+        for field in struct.fields:
+            field_name = field.sym.qualified_name()
+            match field.type.kind:
+                case TypeKind.type:
+                    try:
+                        type = self.get_value_on_stack(field.type.sym)
+                    except KeyError:
+                        raise StructNotDefined(f"{field.type.sym.name} not defined")
+                case _:
+                    try:
+                        # TODO: lookup other structs
+                        type = SERQ_TO_C_TYPE[field.type.kind]
+                    except KeyError:
+                        raise NotImplementedError(f"field of type {field.type.kind} not implemented")
+
+            fields.append((field_name, type))
+
+        class SerqStruct(ctypes.Structure):
+            _fields_ = fields
+
+        SerqStruct.__name__ = name
+
+        return SerqStruct
 
     def eval_binary_expression(self, expression: NodeBinaryExpr) -> Any:
         match expression:
@@ -108,7 +152,7 @@ class SerqVM:
                 operation = operator.gt
             case NodeGreaterEqualsExpression():
                 operation = operator.ge
-            case NodeDotExpr():
+            case NodeDotAccess():
                 raise NotImplementedError()
             case NodeBinaryExpr():
                 raise RuntimeError("uninstatiated binary expression")
@@ -137,12 +181,21 @@ class SerqVM:
                     else:
                         self.debug_hook(val)
                     return Unit()
+                
+                # TODO: handle passing args to constructor
+                elif isinstance(expression.callee.symbol.definition_node, NodeStructDefinition):  # type: ignore
+                    assert isinstance(expression.callee, NodeSymbol)
+                    struct = self.get_value_on_stack(expression.callee.symbol)
+                    # this is a ctypes.Structure type
+                    return struct()
+
                 else:
                     stack = self.stack.copy()
                     self.enter_scope()
 
                     # TODO: Change these lines once function pointers exist
                     assert isinstance(expression.callee, NodeSymbol)
+                    # TODO: make symbol generic for definition node
                     fn_def: NodeFnDefinition = expression.callee.symbol.definition_node  # type: ignore (olaf code)
                     for i in range(0, len(expression.args)):
                         val = self.eval(expression.args[i])
@@ -181,6 +234,10 @@ class SerqVM:
 
             case NodeEmpty():
                 return Unit()
+
+            case NodeDotAccess():
+                left = self.eval(expression.lhs)
+                return getattr(left, expression.rhs.qualified_name())
 
             case _:
                 raise NotImplementedError(f"{expression=}")
@@ -221,8 +278,12 @@ class SerqVM:
                     )
 
                 case NodeAssignment():
-                    assert isinstance(child.lhs, NodeSymbol)
-                    self.set_value_on_stack(child.lhs.symbol, self.eval(child.rhs))
+                    assert isinstance(child.lhs, (NodeSymbol, NodeDotAccess)), f"{type(child.lhs)=}"
+
+                    if isinstance(child.lhs, NodeDotAccess):
+                        setattr(self.eval(child.lhs.lhs), child.lhs.rhs.qualified_name(), self.eval(child.rhs))
+                    else:
+                        self.set_value_on_stack(child.lhs.symbol, self.eval(child.rhs))
 
                 case NodeBlockStmt():
                     self.enter_scope()
@@ -267,6 +328,9 @@ class SerqVM:
                     return_value = self.eval(child.expr)
                     logger.debug(f"returning with {return_value}")
                     raise ReturnError(return_value)
+
+                case NodeStructDefinition():
+                    self.push_value_on_stack(child.sym, self.construct_serq_struct(child))
 
                 case _:
                     # assume expression

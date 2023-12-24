@@ -23,3 +23,51 @@ let x = add(1, 1)
 def test_empty_literal(capture_first_debug):
     assert capture_first_debug("dbg(\"\")") == ""
 
+
+BAD_STRUCT_TYPE_INFERENCE = [
+"""
+struct A {
+    x: int32
+}
+
+let w: float = A().x
+""",
+"""
+struct A {
+    x: int32
+}
+
+let w = A()
+let q = w.x + "def"
+"""
+]
+
+
+@pytest.mark.parametrize("code", BAD_STRUCT_TYPE_INFERENCE)
+def test_bad_struct_type_inference(executor, code):
+    with pytest.raises(ValueError):
+        executor(code)
+
+
+GOOD_STRUCT_TYPE_INFERENCE = [
+"""
+struct A {
+    x: int32
+}
+
+let w: int32 = A().x
+""",
+"""
+struct A {
+    x: int32
+}
+
+let w = A()
+let q = w.x + 2
+"""
+]
+
+
+@pytest.mark.parametrize("code", GOOD_STRUCT_TYPE_INFERENCE)
+def test_good_struct_type_inference(executor, code):
+    executor(code)
