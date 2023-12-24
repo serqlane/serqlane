@@ -4,13 +4,14 @@ import pytest
 def test_invalid_cohersion(executor):
     # TODO: this should probably raise a better exception
     with pytest.raises(AssertionError):
-        executor('let x: int = "abc"')
+        executor('let x: int64 = "abc"')
 
 
 def test_floating_function_return_type(executor):
     with pytest.raises(AssertionError):
         executor(
             """
+alias int = int64
 fn add(a: int, b: int) -> string {
     a + b
 }
@@ -30,7 +31,7 @@ struct A {
     x: int32
 }
 
-let w: float = A().x
+let w: float64 = A().x
 """,
 """
 struct A {
