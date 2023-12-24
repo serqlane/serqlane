@@ -27,14 +27,14 @@ def test_empty_literal(capture_first_debug):
 BAD_STRUCT_TYPE_INFERENCE = [
 """
 struct A {
-    x: int32
+    x: s32
 }
 
-let w: float = A().x
+let w: f32 = A().x
 """,
 """
 struct A {
-    x: int32
+    x: s32
 }
 
 let w = A()
@@ -52,14 +52,14 @@ def test_bad_struct_type_inference(executor, code):
 GOOD_STRUCT_TYPE_INFERENCE = [
 """
 struct A {
-    x: int32
+    x: s32
 }
 
-let w: int32 = A().x
+let w: s32 = A().x
 """,
 """
 struct A {
-    x: int32
+    x: s32
 }
 
 let w = A()

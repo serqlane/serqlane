@@ -74,10 +74,10 @@ class Unit:
 
 
 SERQ_TO_C_TYPE = {
-    TypeKind.int32: ctypes.c_int32,
-    TypeKind.float32: ctypes.c_float,
-    TypeKind.int64: ctypes.c_int64,
-    TypeKind.float64: ctypes.c_double,
+    TypeKind.s32: ctypes.c_int32,
+    TypeKind.f32: ctypes.c_float,
+    TypeKind.s64: ctypes.c_int64,
+    TypeKind.f64: ctypes.c_double,
 }
 
 
