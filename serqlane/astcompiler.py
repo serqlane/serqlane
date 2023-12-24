@@ -182,7 +182,7 @@ class NodeGreaterEqualsExpression(NodeBinaryExpr):
         return f"({self.lhs.render()} >= {self.rhs.render()})"
 
 class NodeDotAccess(Node):
-    def __init__(self, lhs: Symbol, rhs: Symbol) -> None:
+    def __init__(self, lhs: Node, rhs: Symbol) -> None:
         super().__init__(rhs.type)
         self.lhs = lhs
         self.rhs = rhs
@@ -251,7 +251,7 @@ class NodeStructField(Node):
         return f"{self.sym.render()}: {self.type.sym.render()}"
 
 class NodeStructDefinition(Node):
-    def __init__(self, sym: Symbol, fields: list[NodeStructDefinition], type: Type) -> None:
+    def __init__(self, sym: Symbol, fields: list[NodeStructField], type: Type) -> None:
         super().__init__(type)
         self.sym = sym
         self.fields = fields
