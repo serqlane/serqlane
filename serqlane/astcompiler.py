@@ -1345,16 +1345,6 @@ class ModuleGraph:
 
         self.builtin_scope.put_builtin_type(TypeKind.pointer)
 
-        # TODO: hack
-        native_int = self.builtin_scope.put_magic("int")
-        native_int.type = self.builtin_scope.lookup(TypeKind.int64.name).type
-
-        native_uint = self.builtin_scope.put_magic("uint")
-        native_uint.type = self.builtin_scope.lookup(TypeKind.uint64.name).type
-
-        native_float = self.builtin_scope.put_magic("float")
-        native_float.type = self.builtin_scope.lookup(TypeKind.float64.name).type
-        
         # TODO
         self.builtin_scope.put_builtin_type(TypeKind.string)
         self.builtin_scope.put_builtin_type(TypeKind.array)
