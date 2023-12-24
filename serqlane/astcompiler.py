@@ -967,20 +967,20 @@ class CompCtx(lark.visitors.Interpreter):
         rhs = self.visit(tree.children[1], lhs.type)
         assert lhs.type.types_compatible(rhs.type)
 
-        def report_immutable():
-            raise ValueError(f"{lhs.symbol.name} is not mutable")
+        def report_immutable(sym: Symbol):
+            raise ValueError(f"{sym.name} is not mutable")
 
         match lhs:
             case NodeSymbol():
                 if not lhs.symbol.mutable:
-                    report_immutable()
+                    report_immutable(lhs.symbol)
             case NodeDotAccess():
                 leftmost = lhs.lhs
                 while isinstance(leftmost, NodeDotAccess):
                     leftmost = leftmost.lhs
                 assert isinstance(leftmost, NodeSymbol)
                 if not leftmost.symbol.mutable:
-                    report_immutable()
+                    report_immutable(leftmost.symbol)
             case _:
                 raise NotImplementedError
         
