@@ -182,7 +182,7 @@ class NodeGreaterEqualsExpression(NodeBinaryExpr):
         return f"({self.lhs.render()} >= {self.rhs.render()})"
 
 class NodeDotAccess(Node):
-    def __init__(self, lhs: Symbol, rhs: Symbol) -> None:
+    def __init__(self, lhs: Node, rhs: Symbol) -> None:
         super().__init__(rhs.type)
         self.lhs = lhs
         self.rhs = rhs
@@ -251,7 +251,7 @@ class NodeStructField(Node):
         return f"{self.sym.render()}: {self.type.sym.render()}"
 
 class NodeStructDefinition(Node):
-    def __init__(self, sym: Symbol, fields: list[NodeStructDefinition], type: Type) -> None:
+    def __init__(self, sym: Symbol, fields: list[NodeStructField], type: Type) -> None:
         super().__init__(type)
         self.sym = sym
         self.fields = fields
@@ -313,6 +313,9 @@ class Symbol:
         self.mutable = mutable
         self.definition_node: Node = None
         self.magic = magic
+
+    def qualified_name(self):
+        return self.name + self.id
 
     def __repr__(self) -> str:
         return self.render(debug=True)
@@ -964,20 +967,20 @@ class CompCtx(lark.visitors.Interpreter):
         rhs = self.visit(tree.children[1], lhs.type)
         assert lhs.type.types_compatible(rhs.type)
 
-        def report_immutable():
-            raise ValueError(f"{lhs.symbol.name} is not mutable")
+        def report_immutable(sym: Symbol):
+            raise ValueError(f"{sym.name} is not mutable")
 
         match lhs:
             case NodeSymbol():
                 if not lhs.symbol.mutable:
-                    report_immutable()
+                    report_immutable(lhs.symbol)
             case NodeDotAccess():
                 leftmost = lhs.lhs
                 while isinstance(leftmost, NodeDotAccess):
                     leftmost = leftmost.lhs
                 assert isinstance(leftmost, NodeSymbol)
                 if not leftmost.symbol.mutable:
-                    report_immutable()
+                    report_immutable(leftmost.symbol)
             case _:
                 raise NotImplementedError
         
