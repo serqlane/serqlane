@@ -549,9 +549,9 @@ class Type:
         assert self.kind in literal_types
         match self.kind:
             case TypeKind.literal_int:
-                return graph.builtin_scope.lookup_type("int")
+                return graph.builtin_scope.lookup_type("int64")
             case TypeKind.literal_float:
-                return graph.builtin_scope.lookup_type("float")
+                return graph.builtin_scope.lookup_type("float64")
             case TypeKind.literal_bool:
                 return graph.builtin_scope.lookup_type("bool")
             case TypeKind.literal_string:
@@ -829,10 +829,10 @@ class CompCtx(lark.visitors.Interpreter):
             return node_type(value=value, type=Type(literal_kind, sym=None))
 
     def integer(self, tree: Tree, expected_type: Type):
-        return self.handle_literal(tree, expected_type, "int", TypeKind.literal_int, NodeIntLit, int)
+        return self.handle_literal(tree, expected_type, "int64", TypeKind.literal_int, NodeIntLit, int)
     
     def decimal(self, tree: Tree, expected_type: Type):
-        return self.handle_literal(tree, expected_type, "float", TypeKind.literal_float, NodeFloatLit, float)
+        return self.handle_literal(tree, expected_type, "float64", TypeKind.literal_float, NodeFloatLit, float)
     
     def bool(self, tree: Tree, expected_type: Type):
         return self.handle_literal(tree, expected_type, "bool", TypeKind.literal_bool, NodeBoolLit, lambda x: x == "true")
