@@ -1089,7 +1089,6 @@ class CompCtx(lark.visitors.Interpreter):
         res_node = NodeAliasDefinition(alias_sym, src.symbol, self.get_unit_type())
         alias_sym.definition_node = res_node
         return res_node
-        print(name, src)
 
     def struct_field(self, tree: Tree, expected_type: Type):
         assert expected_type.kind == TypeKind.unit
