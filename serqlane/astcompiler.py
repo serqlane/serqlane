@@ -28,6 +28,7 @@ RESERVED_KEYWORDS = [
     "or",
     "return",
     "while",
+    "struct",
 ]
 
 class Node:
