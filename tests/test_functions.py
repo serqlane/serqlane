@@ -5,7 +5,7 @@ import pytest
 return_tests = [
     (
         """
-fn add(a: int, b: int) -> int {
+fn add(a: u32, b: u32) -> u32 {
     return a + b
 }
 
@@ -16,7 +16,7 @@ dbg(x)
     ),
     (
         """
-fn add(a: int, b: int) -> int {
+fn add(a: u32, b: u32) -> u32 {
     a + b
 }
 
@@ -32,7 +32,7 @@ def test_variable_shadowing(capture_first_debug):
     code = """
 let x = 1
 
-fn foo(x: int) -> int {
+fn foo(x: u32) -> u32 {
     return x
 }
 
@@ -50,7 +50,7 @@ def test_return(capture_first_debug, code, expected):
 
 def test_recusive_function(capture_first_debug):
     code = """
-fn add_one(x: int) -> int {
+fn add_one(x: u32) -> u32 {
     if x == 1 {
         // should give us 4
         return add_one(x + 1) + 1
@@ -85,7 +85,7 @@ true()
 # code, expected
 overload_tests = [
 ("""
-fn abc(a: int) -> int {
+fn abc(a: u32) -> u32 {
     a
 }
 
@@ -97,11 +97,11 @@ dbg(abc(1))
 """, 1),
 (
 """
-fn abc() -> int {
+fn abc() -> u32 {
     1
 }
 
-fn abc(a: int) -> int {
+fn abc(a: u32) -> u32 {
     a
 }
 
@@ -109,11 +109,11 @@ dbg(abc())
 """, 1),
 (
 """
-fn abc(a: int) -> int {
+fn abc(a: u32) -> u32 {
     a
 }
 
-fn abc(a: int, b: string) -> int {
+fn abc(a: u32, b: string) -> u32 {
     a
 }
 

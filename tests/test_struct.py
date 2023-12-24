@@ -6,7 +6,7 @@ def test_chained(capture_first_debug):
         capture_first_debug(
             """
 struct A {
-    x: int
+    x: u32
 }
 
 struct B {
@@ -27,7 +27,7 @@ def test_multi_instance(capture_first_debug):
         capture_first_debug(
             """
 struct A {
-    x: int
+    x: u32
 }
 
 let mut a = A()
@@ -48,7 +48,7 @@ def test_mutability(executor):
         executor(
             """
 struct A {
-    x: int
+    x: u32
 }
 
 struct B {
@@ -67,7 +67,7 @@ def test_function_dot_access(capture_first_debug):
         capture_first_debug(
             """
 struct A {
-    x: int
+    x: u32
 }
 
 fn give_a() -> A {

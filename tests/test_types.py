@@ -4,14 +4,14 @@ import pytest
 def test_invalid_cohersion(executor):
     # TODO: this should probably raise a better exception
     with pytest.raises(AssertionError):
-        executor('let x: int = "abc"')
+        executor('let x: u32 = "abc"')
 
 
 def test_floating_function_return_type(executor):
     with pytest.raises(AssertionError):
         executor(
             """
-fn add(a: int, b: int) -> string {
+fn add(a: u32, b: u32) -> string {
     a + b
 }
 
