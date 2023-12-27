@@ -60,6 +60,7 @@
             python3.pkgs.black
             python3.pkgs.isort
             python3.pkgs.vulture
+            python3.pkgs.mkdocs-material
           ];
         };
       };
