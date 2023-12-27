@@ -1,11 +1,6 @@
 name: "build"
 on:
     pull_request:
-        paths:
-            - "serqlane/**"
-            - "flake.*"
-            - ".github/workflows/build.yml"
-            - "pyproject.toml"
     push:
         branches: ["main"]
         paths:
