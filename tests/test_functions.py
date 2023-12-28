@@ -136,3 +136,28 @@ dbg(abc(1))
 @pytest.mark.parametrize("code,expected", overload_tests)
 def test_overloads(capture_first_debug, code, expected):
     assert capture_first_debug(code) == expected
+
+
+generic_tests = [
+(
+"""
+fn add[T, R](a: T, b: T) -> R {
+    a + b
+}
+dbg(add[int64, int64](1, 1))
+""", 2
+),
+# (
+# """
+# fn get_string[T](a: T) -> T {
+#     return a
+# }
+# dbg(get_string("abc"))
+# """, "abc"
+# ),
+]
+
+
+@pytest.mark.parametrize("code,expected", generic_tests)
+def test_generics(capture_first_debug, code, expected):
+    assert capture_first_debug(code) == expected
