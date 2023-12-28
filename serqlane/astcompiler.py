@@ -1406,7 +1406,7 @@ class CompCtx(lark.visitors.Interpreter):
                 callee = self.visit(tree.children[0], None)
             # TODO: allow non-symbol calls i.e. function pointers
             if callee == None:
-                raise ValueError(f"Tried calling a generic function without binding generic params")
+                raise ValueError(f"Unable to find callee or tried calling a generic function without binding generic params")
                 callee = self.visit(tree.children[0], None)
             assert callee != None, f"No matching overload found for {tree.children[0].children[0].children[0]}"
             assert isinstance(callee, NodeSymbol), "can only call symbols"
