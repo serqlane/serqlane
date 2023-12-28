@@ -1186,9 +1186,9 @@ class CompCtx(lark.visitors.Interpreter):
         sym = self.current_scope.put_type(ident)
 
         fields = []
-        if tree.children[1] != None:
+        if tree.children[2] != None:
             self.open_scope()
-            for field_node in tree.children[1:]:
+            for field_node in tree.children[2:]:
                 # TODO: Recursion check. Recursion is currently unrestricted and permits infinite recursion
                 #   For proper recursion handling we also gotta ensure we don't try to access a type that is currently being processed like will be the case with mutual recursion
                 field = self.visit(field_node, self.get_unit_type())
