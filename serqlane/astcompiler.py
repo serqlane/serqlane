@@ -1383,6 +1383,7 @@ class CompCtx(lark.visitors.Interpreter):
                     for i in range(0, len(tree.children[1].children)):
                         unresolved_args.append(self.visit(tree.children[1].children[i], self.get_infer_type()))
             
+            callee = None
             if len(tree.children[0].children) > 0 and tree.children[0].children[0].data == "identifier":
                 # TODO: Better handling, use a candidate node instead
                 for fn in self.current_scope.iter_function_defs(tree.children[0].children[0].children[0].value):
@@ -1405,7 +1406,7 @@ class CompCtx(lark.visitors.Interpreter):
                 callee = self.visit(tree.children[0], None)
             # TODO: allow non-symbol calls i.e. function pointers
             if callee == None:
-                assert False
+                raise ValueError(f"Tried calling a generic function without binding generic params")
                 callee = self.visit(tree.children[0], None)
             assert callee != None, f"No matching overload found for {tree.children[0].children[0].children[0]}"
             assert isinstance(callee, NodeSymbol), "can only call symbols"
