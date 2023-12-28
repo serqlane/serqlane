@@ -759,7 +759,10 @@ class CompCtx(lark.visitors.Interpreter):
                 case _:
                     raise RuntimeError("Unsupported empty literal")
 
-        if expected_type != None:
+        if literal_kind is TypeKind.literal_string:
+            value = self.resolve_escape_sequence(value)
+
+        if expected_type is not None:
             if expected_type.kind in free_infer_types:
                 expected_type = self.current_scope.lookup_type(lookup_name, shallow=True)
             else:
@@ -767,6 +770,10 @@ class CompCtx(lark.visitors.Interpreter):
             return node_type(value=value, type=expected_type)
         else:
             return node_type(value=value, type=Type(literal_kind, sym=None))
+
+    @staticmethod
+    def resolve_escape_sequence(value: str) -> str:
+        return value.replace('\\"', '"')
 
     def integer(self, tree: Tree, expected_type: Type):
         return self.handle_literal(tree, expected_type, "int", TypeKind.literal_int, NodeIntLit, int)
