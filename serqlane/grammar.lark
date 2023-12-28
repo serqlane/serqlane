@@ -1,7 +1,7 @@
 start: statement*
 
 // TODO: Constrained params
-generic_params: "<" identifier ("," identifier)* ">"
+generic_params: "[" identifier ("," identifier)* "]"
 
 
 // TODO: generics for both types and functions
@@ -16,12 +16,14 @@ enum_adt_inner: [identifier ":"] _type
 alias_definition: "alias" identifier "=" _type
 distinct_definition: "distinct" identifier "=" _type
 
+generic_inst: expression "[" expression ("," expression)* "]"
+
 
 fn_definition: "fn" identifier [generic_params] fn_definition_args [return_user_type] block_stmt
 fn_definition_args: "(" [fn_definition_arg ("," fn_definition_arg)*] ")"
 fn_definition_arg: identifier user_type
 
-fn_call_expr: expression fn_call_args
+fn_call_expr: expression fn_call_args 
 fn_call_args: "(" [expression ("," expression)*] ")"
 
 

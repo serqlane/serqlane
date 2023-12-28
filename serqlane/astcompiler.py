@@ -3,11 +3,12 @@ from __future__ import annotations
 from enum import Enum, auto
 from typing import Any, Optional, Iterator
 
+import copy
 import hashlib
 import textwrap
 
 import lark.visitors
-from lark import Token, Tree
+from lark import Token, Tree, reconstruct
 
 from serqlane.parser import SerqParser
 
@@ -48,12 +49,14 @@ class NodeEmpty(Node):
         return ""
 
 class NodeSymbol(Node):
-    def __init__(self, symbol: Symbol, type: Type) -> None:
+    def __init__(self, symbol: Symbol, type: Type, original: Optional[Node] = None) -> None:
         super().__init__(type)
         self.symbol = symbol
+        self.original = original
 
     def render(self) -> str:
-        # TODO: Unique global identifier later
+        if self.original != None:
+            return self.original.render()
         return f"{self.symbol.render()}"
 
 class NodeStmtList(Node):
@@ -310,6 +313,32 @@ class NodeFnCall(Node):
         args = ", ".join([x.render() for x in self.args])
         return f"{self.callee.render()}({args})"
 
+class NodeUnfinished(Node):
+    def __init__(self, inner: Node, type: Type) -> None:
+        super().__init__(type)
+        self.inner = inner
+
+    def render(self) -> str:
+        return f"{self.inner.render()}"
+
+class NodeGenericInstantiation(Node):
+    def __init__(self, callee: Node, params: list[Node], type: Type) -> None:
+        super().__init__(type)
+        self.callee = callee
+        self.params = params
+
+    def render(self) -> str:
+        params = ", ".join([x.render() for x in self.params])
+        return f"{self.callee.render()}[{params}]"
+
+class NodeSymCandidates(Node):
+    def __init__(self, syms: list[Symbol]) -> None:
+        self.syms = syms
+
+    def render(self) -> str:
+        syms = [x.render() for x in self.syms]
+        return f"candidates{{{syms}}}"
+
 
 # TODO: Use these, will make later analysis easier
 class SymbolKind(Enum):
@@ -330,6 +359,7 @@ class Symbol:
         self.mutable = mutable
         self.definition_node: Node = None
         self.uninstantiated_body: Tree = None
+        self.generic_definition_scope: Scope = None # workaround to make generic instantation work
         self.magic = magic
 
     def qualified_name(self):
@@ -347,6 +377,7 @@ class Symbol:
 
 class TypeKind(Enum):
     error = auto() # bad type
+    unchecked = auto() # found in unfinished generic bodies, anywhere else this is an error
     infer = auto() # marker type to let nodes know to infer their own types
     magic = auto() # TODO: Get rid of later. Exists to make compiler magics work for debugging
  
@@ -428,6 +459,7 @@ logical_types = frozenset([
 free_infer_types = frozenset([
     TypeKind.magic,
     TypeKind.infer,
+    TypeKind.unchecked,
 ])
 
 callable_types = frozenset([
@@ -446,7 +478,7 @@ class GenericArg:
         self.sym = sym
 
 class Type:
-    def __init__(self, kind: TypeKind, sym: Symbol, generic_params: NodeGenericParams = None, data: Any = None) -> None:
+    def __init__(self, kind: TypeKind, sym: Symbol, data: Any = None, generic_params: NodeGenericParams = None) -> None:
         self.kind = kind
         self.data = data # TODO: arbitrary data for now
         self.sym = sym
@@ -557,6 +589,12 @@ class Type:
             case TypeKind.literal_string:
                 return other.kind in {TypeKind.literal_string, TypeKind.string}
 
+            case TypeKind.generic_param:
+                return True # TODO: Once generic constraints are in this is gonna have to change
+
+            case TypeKind.unchecked:
+                return True
+
             case _:
                 raise ValueError(f"Unimplemented type comparison: {self.kind}")
 
@@ -586,8 +624,10 @@ class Type:
             return f"fn({args}): {self.data[1].render()}"
         elif self.kind == TypeKind.type:
             return self.sym.definition_node.render()
+        elif self.kind == TypeKind.generic_param:
+            return self.sym.render()
         else:
-            raise NotImplementedError(self)
+            raise NotImplementedError(self.kind)
 
 
 class Scope:
@@ -596,21 +636,23 @@ class Scope:
         self.parent: Scope = None
         self.module_graph = graph # TODO: Get rid of builtin hack
 
-    def iter_function_defs(self, name: str) -> Iterator[Symbol]:
+    def iter_syms(self, name: str) -> Iterator[Symbol]:
         # prefer magics
         if self.module_graph.builtin_scope != self:
-            for sym in self.module_graph.builtin_scope.iter_function_defs(name):
+            for sym in self.module_graph.builtin_scope.iter_syms(name):
                 if sym.name == name:
                     yield sym
 
         for sym in self._local_syms:
-            # TODO: Maybe split functions and types here? Also handle builtin types here, no reason they should be different
-            if sym.type.kind not in callable_types:
-                continue
             if sym.name == name:
                 yield sym
         if self.parent != None:
-            yield from self.parent.iter_function_defs(name)
+            yield from self.parent.iter_syms(name)
+
+    def iter_function_defs(self, name: str) -> Iterator[Symbol]:
+        for sym in self.iter_syms(name):
+            if sym.type.kind in callable_types:
+                yield sym
 
     def _lookup_impl(self, name: str, shallow=False) -> Symbol:
         for symbol in self._local_syms:
@@ -645,6 +687,11 @@ class Scope:
         self._local_syms.append(result)
         return result
     
+    def put_generic_instance(self, name: str, type: Type) -> Symbol:
+        sym = self.put(name + "_geninst", checked=False, shallow=True)
+        sym.type = type
+        return sym
+
     def put_function(self, name: str, type: Type) -> Symbol:
         assert type.kind == TypeKind.function
         for fn in self.iter_function_defs(name):
@@ -699,6 +746,8 @@ class CompCtx(lark.visitors.Interpreter):
         self.current_scope = self.module.global_scope
         self.fn_ret_type_stack: list[Type] = []
         self.in_loop_counter = 0
+        self.generic_ctx_counter = 0
+        self.generic_sub_ctx: Optional[GenericSubstitutionCtx] = None # TODO: This should be a stack instead
 
     def open_scope(self):
         self.current_scope = self.current_scope.make_child()
@@ -714,6 +763,9 @@ class CompCtx(lark.visitors.Interpreter):
 
     def get_generic_param_type(self) -> Type:
         return Type(kind=TypeKind.generic_param, sym=None)
+
+    def get_unchecked_type(self) -> Type:
+        return Type(kind=TypeKind.unchecked, sym=None)
 
     # overrides
     def visit(self, tree: Tree, expected_type: Type) -> Node:
@@ -796,6 +848,8 @@ class CompCtx(lark.visitors.Interpreter):
 
     def block_stmt(self, tree: Tree, expected_type: Type):
         self.open_scope()
+        generic_body = self.generic_ctx_counter > 0
+
         if len(tree.children) == 0:
             return NodeBlockStmt(self.get_unit_type())
 
@@ -810,7 +864,8 @@ class CompCtx(lark.visitors.Interpreter):
 
         if expected_type != None:
             result.add(self.visit(last_child, expected_type))
-            assert expected_type.types_compatible(result.children[-1].type), f"Expected type {expected_type.sym.render()} for block but got {result.children[-1].type.sym.render()}"
+            if not generic_body:
+                assert expected_type.types_compatible(result.children[-1].type), f"Expected type {expected_type.sym.render()} for block but got {result.children[-1].type.sym.render()}"
             result.type = result.children[-1].type
         elif len(result.children) > 0:
             result.add(self.visit(last_child, None))
@@ -868,10 +923,12 @@ class CompCtx(lark.visitors.Interpreter):
         op = tree.children[1].data.value
         # a dot expression does not work by the same type rules
         if op != "dot":
+            check_types = self.generic_ctx_counter == 0
+
             rhs = self.visit(tree.children[2], None)
 
             # TODO: Dot expr
-            if not lhs.type.types_compatible(rhs.type):
+            if check_types and not lhs.type.types_compatible(rhs.type):
                 # TODO: Error reporting
                 tl = lhs.type.instantiate_literal(self.graph) if lhs.type.kind in literal_types else lhs.type
                 tr = rhs.type.instantiate_literal(self.graph) if rhs.type.kind in literal_types else rhs.type
@@ -911,27 +968,27 @@ class CompCtx(lark.visitors.Interpreter):
 
         match op:
             case "plus":
-                assert expr_type.kind in arith_types
+                if check_types: assert expr_type.kind in arith_types
                 return NodePlusExpr(lhs, rhs, type=expr_type)
             case "minus":
-                assert expr_type.kind in arith_types
+                if check_types: assert expr_type.kind in arith_types
                 return NodeMinusExpression(lhs, rhs, type=expr_type)
             case "star":
-                assert expr_type.kind in arith_types
+                if check_types: assert expr_type.kind in arith_types
                 return NodeMulExpression(lhs, rhs, type=expr_type)
             case "slash":
-                assert expr_type.kind in arith_types
+                if check_types: assert expr_type.kind in arith_types
                 return NodeDivExpression(lhs, rhs, type=expr_type)
             
             case "modulus":
-                assert expr_type.kind in int_types
+                if check_types: assert expr_type.kind in int_types
                 return NodeModExpression(lhs, rhs, type=expr_type)
             
             case "and":
-                assert expr_type.kind in logical_types
+                if check_types: assert expr_type.kind in logical_types
                 return NodeAndExpression(lhs, rhs, type=expr_type)
             case "or":
-                assert expr_type.kind in logical_types
+                if check_types: assert expr_type.kind in logical_types
                 return NodeOrExpression(lhs, rhs, type=expr_type)
             
             # TODO: Is this version of ensure_types correct here?
@@ -944,13 +1001,13 @@ class CompCtx(lark.visitors.Interpreter):
                 assert expr_type.kind in arith_types
                 return NodeLessExpression(lhs, rhs, type=self.current_scope.lookup_type("bool"))
             case "lesseq":
-                assert expr_type.kind in arith_types
+                if check_types: assert expr_type.kind in arith_types
                 return NodeLessEqualsExpression(lhs, rhs, type=self.current_scope.lookup_type("bool"))
             case "greater":
-                assert expr_type.kind in arith_types
+                if check_types: assert expr_type.kind in arith_types
                 return NodeGreaterExpression(lhs, rhs, type=self.current_scope.lookup_type("bool"))
             case "greatereq":
-                assert expr_type.kind in arith_types
+                if check_types: assert expr_type.kind in arith_types
                 return NodeGreaterEqualsExpression(lhs, rhs, type=self.current_scope.lookup_type("bool"))
 
             case "dot":
@@ -975,6 +1032,10 @@ class CompCtx(lark.visitors.Interpreter):
 
     def identifier(self, tree: Tree, expected_type: Type):
         val = tree.children[0].value
+        if self.generic_sub_ctx != None:
+            sym = self.generic_sub_ctx.lookup(val)
+            if sym:
+                return sym
         sym = self.current_scope.lookup(val)
         if sym:
             if expected_type != None:
@@ -1145,6 +1206,7 @@ class CompCtx(lark.visitors.Interpreter):
             ident = p.children[0].value
             sym = self.current_scope.put(ident, shallow=True)
             sym.type = self.get_generic_param_type()
+            sym.type.sym = sym
             params.append(GenericArg(sym))
         return NodeGenericParams(params)
 
@@ -1167,45 +1229,46 @@ class CompCtx(lark.visitors.Interpreter):
 
         return NodeFnParameters(params)
 
-    def fn_definition(self, tree: Tree, expected_type: Type):
-        assert expected_type.kind == TypeKind.unit
+    def generic_instantiation(self, tree: Tree, expected_type: Type):
+        generic_params = []
+        for generic_param_node in tree.children[1].children:
+            generic_param = self.visit(generic_param_node, self.get_unchecked_type())
+            generic_params.append(generic_param)
+        if self.generic_ctx_counter > 0:
+            ident = tree.children[0].children[0].value
+            candidates = []
+            for sym in self.current_scope.iter_syms(ident):
+                if sym.type.is_generic:
+                    candidates.append(sym)
 
-        ident_node = tree.children[0]
-        assert ident_node.data == "identifier"
-        ident = ident_node.children[0].value
+            # in this case we return a bunch of unfinished nodes
+            return NodeUnfinished(
+                NodeGenericInstantiation(
+                    NodeSymCandidates(candidates),
+                    generic_params,
+                    self.get_unchecked_type()
+                ),
+                self.get_unchecked_type()
+            )
+        else:
+            uninstantiated = self.visit(tree.children[0], None)
+            assert isinstance(uninstantiated, NodeSymbol)
+            uninst_sym = uninstantiated.symbol
+            subs = []
+            for generic_param_node in tree.children[1].children:
+                sub = self.visit(generic_param_node, None)
+                subs.append(sub)
+            inst = self.module.generic_cache.gen_inst(uninst_sym, subs, self)
+            if isinstance(inst, NodeFnDefinition):
+                return NodeSymbol(inst.sym, inst.sym.type, original=NodeGenericInstantiation(
+                    uninstantiated,
+                    subs,
+                    self.get_unchecked_type()
+                ))
+            else:
+                raise ValueError(f"Unimplemented instantiation: {type(inst)}")
 
-        # must open a scope here to isolate the params
-        self.open_scope()
-        
-        generic_args_node = self.visit(tree.children[1], self.get_unit_type())
-
-        args_node = self.visit(tree.children[2], self.get_unit_type())
-        assert isinstance(args_node, NodeFnParameters)
-        ret_type_node = NodeSymbol(self.get_unit_type().sym, self.get_unit_type())
-        ret_type = ret_type_node.type
-        if tree.children[2] != None:
-            ret_type_node = self.visit(tree.children[3], None)
-            assert isinstance(ret_type_node, NodeSymbol)
-            ret_type = ret_type_node.type # TODO: Fix this nonsense, type should be `type`, not whatever the type evaluates to
-
-        # TODO: Use a type cache to load function with the same type from it for easier matching
-        fn_type = Type(
-            kind=TypeKind.function,
-            sym=None,
-            data=([x[1].type for x in args_node.args], ret_type_node),
-            generic_params=generic_args_node
-        )
-
-        # The sym must be created here to make recursive calls work without polluting the arg scope
-        sym = self.current_scope.parent.put_function(ident, fn_type)
-        fn_type.sym = sym
-
-        # TODO: Make this work for generics later
-        self.fn_ret_type_stack.append(ret_type)
-
-        body_node: NodeBlockStmt = self.visit(tree.children[4], self.get_infer_type())
-        assert isinstance(body_node, NodeBlockStmt)
-
+    def handle_fn_body(self, body_node: NodeBlockStmt, ret_type: Type, raw_body: Tree, expected_type: Type):
         # TODO: Simplify checks, we can rely on the fact that it has to be transformed into `return x`
         if len(body_node.children) > 0:
             last_body_node = body_node.children[-1]
@@ -1214,7 +1277,7 @@ class CompCtx(lark.visitors.Interpreter):
             elif isinstance(last_body_node, NodeReturn):
                 pass # return is already checked
             elif last_body_node.type.kind in literal_types:
-                body_node = self.visit(tree.children[4], ret_type)
+                body_node = self.visit(raw_body, ret_type)
                 last_body_node = body_node.children[-1]
                 if last_body_node.type.kind in builtin_userspace_types:
                     assert last_body_node.type.types_compatible(ret_type), f"Invalid return expression type {last_body_node.type.sym.render()} for return type {ret_type.sym.render()}"
@@ -1227,6 +1290,62 @@ class CompCtx(lark.visitors.Interpreter):
                     body_node.children[-1] = NodeReturn(last_body_node, self.get_unit_type())
         else:
             body_node.children.append(NodeReturn(NodeEmpty(self.get_unit_type()), self.get_unit_type()))
+
+    def fn_definition(self, tree: Tree, expected_type: Type):
+        assert expected_type.kind == TypeKind.unit
+
+        ident_node = tree.children[0]
+        assert ident_node.data == "identifier"
+        ident = ident_node.children[0].value
+
+        # must open a scope here to isolate the params
+        self.open_scope()
+        
+        declaration_scope = copy.deepcopy(self.current_scope) # TODO: deepcopy is really disgusting
+
+        generic_args_node = None
+        # TODO: Once generic_sub_ctx becomes a stack this will be a problem
+        if self.generic_sub_ctx == None:
+            if tree.children[1] != None:
+                self.generic_ctx_counter += 1
+                generic_args_node = self.visit(tree.children[1], self.get_unit_type())
+
+        args_node = self.visit(tree.children[2], self.get_unit_type())
+        assert isinstance(args_node, NodeFnParameters)
+        ret_type_node = NodeSymbol(self.get_unit_type().sym, self.get_unit_type())
+        ret_type = ret_type_node.type
+        if tree.children[3] != None:
+            ret_type_node = self.visit(tree.children[3], None)
+            assert isinstance(ret_type_node, NodeSymbol)
+            ret_type = ret_type_node.type # TODO: Fix this nonsense, type should be `type`, not whatever the type evaluates to
+
+        # TODO: Use a type cache to load function with the same type from it for easier matching
+        fn_type = Type(
+            kind=TypeKind.function,
+            sym=None,
+            data=([x[1].type for x in args_node.args], ret_type_node),
+            generic_params=generic_args_node,
+        )
+
+        # The sym must be created here to make recursive calls work without polluting the arg scope
+        if self.generic_sub_ctx != None: # TODO: Nested generics WILL break
+            sym = self.current_scope.parent.put_generic_instance(ident, fn_type)
+        else:
+            sym = self.current_scope.parent.put_function(ident, fn_type)
+        fn_type.sym = sym
+        if fn_type.is_generic:
+            sym.uninstantiated_body = tree
+            sym.generic_definition_scope = declaration_scope
+
+        # TODO: Make this work for generics later
+        self.fn_ret_type_stack.append(ret_type)
+
+        body_node: NodeBlockStmt = self.visit(tree.children[4], self.get_infer_type())
+        assert isinstance(body_node, NodeBlockStmt)
+        self.handle_fn_body(body_node, ret_type, tree.children[4], expected_type)
+
+        if generic_args_node != None:
+            self.generic_ctx_counter -= 1
 
         self.fn_ret_type_stack.pop()
 
@@ -1242,67 +1361,84 @@ class CompCtx(lark.visitors.Interpreter):
 
     def fn_call_expr(self, tree: Tree, expected_type: Type):
         # TODO: Once overloads/methods are in, this must scan visible symbols and retrieve a list. Handled in identifier though
-        unresolved_args: list[Node] = []
-        if tree.children[1] != None:
-            # child 0 is None in empty calls i.e f()
-            if tree.children[1].children[0] is not None:
-                for i in range(0, len(tree.children[1].children)):
-                    unresolved_args.append(self.visit(tree.children[1].children[i], self.get_infer_type()))
-        
-        callee = None
-        if len(tree.children[0].children) > 0 and tree.children[0].children[0].data == "identifier":
-            # TODO: Better handling, use a candidate node instead
-            for fn in self.current_scope.iter_function_defs(tree.children[0].children[0].children[0].value):
-                if fn.type.kind == TypeKind.type:
-                    assert len(unresolved_args) == 0, "Calling a struct with arguments is not yet supported" # TODO 
-                    callee = NodeSymbol(fn, fn.type)
-                    break
-                else:
-                    if len(unresolved_args) != len(fn.type.function_arg_types()):
-                        continue
-                    matches = True
-                    for i in range(0, len(unresolved_args)):
-                        if not unresolved_args[i].type.types_compatible(fn.type.function_arg_types()[i]):
-                            matches = False
-                            break
-                    if matches:
-                        callee = NodeSymbol(fn, fn.type)
-                        break
-        else:
-            callee = self.visit(tree.children[0], None)
-        # TODO: allow non-symbol calls i.e. function pointers
-        assert callee != None, f"No matching overload found for {tree.children[0].children[0].children[0]}"
-        assert isinstance(callee, NodeSymbol), "can only call symbols"
-
-        params = []
-        ret_type = None
-        if callee.type.kind == TypeKind.type:
-            ret_type = callee.type
-        else:
-            arg_types = callee.symbol.type.data[0]
-            ret_type_node = callee.symbol.type.data[1]
-            ret_type = None
-            if ret_type_node != None:
-                assert isinstance(ret_type_node, NodeSymbol), f"{ret_type_node=}"
-                ret_type = ret_type_node.type # TODO: Fix garbage type, should be a `type`, not evaluated type
-            else:
-                ret_type = self.current_scope.lookup_type("unit", shallow=True)
-
+        if self.generic_ctx_counter > 0:
+            callee = self.visit(tree.children[0], self.get_unchecked_type())
             params = []
+            if tree.children[1].children[0] != None:
+                for param in tree.children[1].children:
+                    params.append(NodeUnfinished(self.visit(param, self.get_unchecked_type()), self.get_unchecked_type()))
+            return NodeUnfinished(
+                NodeFnCall(
+                    NodeUnfinished(callee, self.get_unchecked_type()),
+                    params,
+                    self.get_unchecked_type()
+                ),
+                self.get_unchecked_type()
+            )
+        else:
+            unresolved_args: list[Node] = []
             if tree.children[1] != None:
                 # child 0 is None in empty calls i.e f()
                 if tree.children[1].children[0] is not None:
-                    assert len(tree.children[1].children) == len(arg_types)
-                    for i in range(0, len(arg_types)):
-                        params.append(self.visit(tree.children[1].children[i], arg_types[i]))
+                    for i in range(0, len(tree.children[1].children)):
+                        unresolved_args.append(self.visit(tree.children[1].children[i], self.get_infer_type()))
+            
+            if len(tree.children[0].children) > 0 and tree.children[0].children[0].data == "identifier":
+                # TODO: Better handling, use a candidate node instead
+                for fn in self.current_scope.iter_function_defs(tree.children[0].children[0].children[0].value):
+                    if fn.type.kind == TypeKind.type:
+                        assert len(unresolved_args) == 0, "Calling a struct with arguments is not yet supported" # TODO 
+                        callee = NodeSymbol(fn, fn.type)
+                        break
+                    else:
+                        if len(unresolved_args) != len(fn.type.function_arg_types()):
+                            continue
+                        matches = True
+                        for i in range(0, len(unresolved_args)):
+                            if not unresolved_args[i].type.types_compatible(fn.type.function_arg_types()[i]):
+                                matches = False
+                                break
+                        if matches:
+                            callee = NodeSymbol(fn, fn.type)
+                            break
             else:
-                assert len(arg_types) == 0
+                callee = self.visit(tree.children[0], None)
+            # TODO: allow non-symbol calls i.e. function pointers
+            if callee == None:
+                assert False
+                callee = self.visit(tree.children[0], None)
+            assert callee != None, f"No matching overload found for {tree.children[0].children[0].children[0]}"
+            assert isinstance(callee, NodeSymbol), "can only call symbols"
 
-        return NodeFnCall(
-            callee=callee,
-            args=params,
-            type=ret_type
-        )
+            params = []
+            ret_type = None
+            if callee.type.kind == TypeKind.type:
+                ret_type = callee.type
+            else:
+                arg_types = callee.symbol.type.data[0]
+                ret_type_node = callee.symbol.type.data[1]
+                ret_type = None
+                if ret_type_node != None:
+                    assert isinstance(ret_type_node, NodeSymbol), f"{ret_type_node=}"
+                    ret_type = ret_type_node.type # TODO: Fix garbage type, should be a `type`, not evaluated type
+                else:
+                    ret_type = self.current_scope.lookup_type("unit", shallow=True)
+
+                params = []
+                if tree.children[1] != None:
+                    # child 0 is None in empty calls i.e f()
+                    if tree.children[1].children[0] is not None:
+                        assert len(tree.children[1].children) == len(arg_types)
+                        for i in range(0, len(arg_types)):
+                            params.append(self.visit(tree.children[1].children[i], arg_types[i]))
+                else:
+                    assert len(arg_types) == 0
+
+            return NodeFnCall(
+                callee=callee,
+                args=params,
+                type=ret_type
+            )
 
     def expression(self, tree: Tree, expected_type: Type):
         # TODO: Handle longer expressions?
@@ -1325,6 +1461,15 @@ class CompCtx(lark.visitors.Interpreter):
         return result
 
 
+class GenericSubstitutionCtx:
+    def __init__(self, substitutions: list[tuple[GenericArg, Node]]):
+        self._substitutions = substitutions
+
+    def lookup(self, name: str) -> Node:
+        for sub in self._substitutions:
+            if sub[0].sym.name == name:
+                return sub[1]
+
 class GenericCache:
     def __init__(self, module: Module) -> None:
         # list of tuple[uninstantiated, list[substitution], instantiated]
@@ -1332,13 +1477,20 @@ class GenericCache:
         self._cache = list[tuple[Symbol, list[Node], Symbol]]
         self.module = module
 
-    def _substitute_generic_params(self, uninstantiated: Node, substitutions: list[tuple[Symbol, Node]]):
-        ## Substitutes the symbol in substitutions with the Node
-        substituted = copy(uninstantiated)
-
-    def gen_inst(self, uninstantiated: Symbol, substitutions: list[Node]) -> Symbol:
-        assert len(uninstantiated.type.generic_args) == len(substitutions)
-        uninst_node = uninstantiated.definition_node
+    def gen_inst(self, uninstantiated: Symbol, substitutions: list[Node], compctx: CompCtx) -> Node:
+        assert len(uninstantiated.type.generic_params.args) == len(substitutions)
+        subs = []
+        for i in range(0, len(substitutions)):
+            subs.append((uninstantiated.type.generic_params.args[i], substitutions[i]))
+        uninst_tree = uninstantiated.uninstantiated_body
+        assert compctx.generic_sub_ctx == None, "Nested generic instantiation is currently not supported"
+        compctx.generic_sub_ctx = GenericSubstitutionCtx(subs)
+        original_scope = compctx.current_scope
+        compctx.current_scope = uninstantiated.generic_definition_scope
+        instantiated_node = compctx.visit(uninst_tree, compctx.get_unit_type())
+        compctx.generic_sub_ctx = None
+        compctx.current_scope = original_scope
+        return instantiated_node
 
 
 class Module:
