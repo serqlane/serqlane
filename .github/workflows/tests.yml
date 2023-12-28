@@ -9,11 +9,6 @@ on:
       - ".github/workflows/tests.yml"
       - "*.lock"
   pull_request:
-    paths:
-      - "serqlane/**"
-      - "tests/**"
-      - ".github/workflows/tests.yml"
-      - "*.lock"
 
 jobs:
   test:

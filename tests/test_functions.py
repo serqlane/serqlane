@@ -5,6 +5,8 @@ import pytest
 return_tests = [
     (
         """
+alias int = int64
+
 fn add(a: int, b: int) -> int {
     return a + b
 }
@@ -16,6 +18,7 @@ dbg(x)
     ),
     (
         """
+alias int = int64
 fn add(a: int, b: int) -> int {
     a + b
 }
@@ -30,6 +33,8 @@ dbg(x)
 
 def test_variable_shadowing(capture_first_debug):
     code = """
+alias int = int64
+    
 let x = 1
 
 fn foo(x: int) -> int {
@@ -50,6 +55,8 @@ def test_return(capture_first_debug, code, expected):
 
 def test_recusive_function(capture_first_debug):
     code = """
+alias int = int64
+
 fn add_one(x: int) -> int {
     if x == 1 {
         // should give us 4
@@ -85,7 +92,7 @@ true()
 # code, expected
 overload_tests = [
 ("""
-fn abc(a: int) -> int {
+fn abc(a: int64) -> int64 {
     a
 }
 
@@ -97,6 +104,8 @@ dbg(abc(1))
 """, 1),
 (
 """
+alias int = int64
+
 fn abc() -> int {
     1
 }
@@ -109,6 +118,8 @@ dbg(abc())
 """, 1),
 (
 """
+alias int = int64
+
 fn abc(a: int) -> int {
     a
 }
