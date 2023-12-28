@@ -270,6 +270,13 @@ class NodeStructDefinition(Node):
         field_strs = "\n".join(["  " + x.render() for x in self.fields])
         return f"struct {self.sym.render()} {{\n{field_strs}\n}}"
 
+class NodeGenericParams(Node):
+    def __init__(self, args: list[GenericArg]):
+        self.args = args
+
+    def render(self) -> str:
+        return f"<{[x.sym.render() for x in self.args]}>"
+
 class NodeFnParameters(Node):
     def __init__(self, args: list[tuple[NodeSymbol, Node]]):
         """
@@ -314,7 +321,7 @@ class SymbolKind(Enum):
 
 
 class Symbol:
-    def __init__(self, id: str, name: str, type: Type = None, mutable: bool = False, magic=False) -> None:
+    def __init__(self, id: str, name: str, type: Type = None, mutable: bool = False, magic=False, uninstantiated_body: Tree = None) -> None:
         # TODO: Should store the source node, symbol kinds
         self.id = id
         self.name = name
@@ -322,6 +329,7 @@ class Symbol:
         self.exported = False
         self.mutable = mutable
         self.definition_node: Node = None
+        self.uninstantiated_body: Tree = None
         self.magic = magic
 
     def qualified_name(self):
@@ -379,6 +387,7 @@ class TypeKind(Enum):
     concrete_type = auto() # non-generic concrete Type or fn()
     generic_inst = auto() # fully instantiated generic type Type[int] or fn[int](): generic_inst[concerete_type, generic_type[params]]
     generic_type = auto() # Type[T] or fn[T](): generic_type[params]
+    generic_param = auto() # The T in Type[T], used for instantiation
     type = auto() # TODO: magic that holds a type itself, not yet in grammar
 
 int_types = frozenset([
@@ -430,11 +439,19 @@ callable_types = frozenset([
 # TODO: Add the other appropriate types
 builtin_userspace_types = frozenset(list(int_types) + list(float_types) + [TypeKind.bool, TypeKind.char, TypeKind.string, TypeKind.unit])
 
+# this is a class because it will have constraints later
+class GenericArg:
+    def __init__(self, sym: Symbol) -> None:
+        assert sym.type.kind == TypeKind.generic_param
+        self.sym = sym
+
 class Type:
-    def __init__(self, kind: TypeKind, sym: Symbol, data: Any = None) -> None:
+    def __init__(self, kind: TypeKind, sym: Symbol, generic_params: NodeGenericParams = None, data: Any = None) -> None:
         self.kind = kind
         self.data = data # TODO: arbitrary data for now
         self.sym = sym
+        self.generic_params = generic_params
+        self.is_generic = generic_params != None # stored here because later there can be implicit generics based on type unions
         # TODO: Add a type id later
 
     def function_arg_types(self) -> list[Type]:
@@ -694,6 +711,9 @@ class CompCtx(lark.visitors.Interpreter):
 
     def get_unit_type(self) -> Type:
         return self.current_scope.lookup_type("unit", shallow=True)
+
+    def get_generic_param_type(self) -> Type:
+        return Type(kind=TypeKind.generic_param, sym=None)
 
     # overrides
     def visit(self, tree: Tree, expected_type: Type) -> Node:
@@ -1118,6 +1138,16 @@ class CompCtx(lark.visitors.Interpreter):
         sym.definition_node = def_node
         return def_node
 
+    def generic_params(self, tree: Tree, expected_type):
+        assert expected_type.kind == TypeKind.unit
+        params = []
+        for p in tree.children:
+            ident = p.children[0].value
+            sym = self.current_scope.put(ident, shallow=True)
+            sym.type = self.get_generic_param_type()
+            params.append(GenericArg(sym))
+        return NodeGenericParams(params)
+
     def fn_definition_args(self, tree: Tree, expected_type: Type):
         assert expected_type.kind == TypeKind.unit
 
@@ -1147,12 +1177,14 @@ class CompCtx(lark.visitors.Interpreter):
         # must open a scope here to isolate the params
         self.open_scope()
         
-        args_node = self.visit(tree.children[1], self.get_unit_type())
+        generic_args_node = self.visit(tree.children[1], self.get_unit_type())
+
+        args_node = self.visit(tree.children[2], self.get_unit_type())
         assert isinstance(args_node, NodeFnParameters)
         ret_type_node = NodeSymbol(self.get_unit_type().sym, self.get_unit_type())
         ret_type = ret_type_node.type
         if tree.children[2] != None:
-            ret_type_node = self.visit(tree.children[2], None)
+            ret_type_node = self.visit(tree.children[3], None)
             assert isinstance(ret_type_node, NodeSymbol)
             ret_type = ret_type_node.type # TODO: Fix this nonsense, type should be `type`, not whatever the type evaluates to
 
@@ -1160,7 +1192,8 @@ class CompCtx(lark.visitors.Interpreter):
         fn_type = Type(
             kind=TypeKind.function,
             sym=None,
-            data=([x[1].type for x in args_node.args], ret_type_node)
+            data=([x[1].type for x in args_node.args], ret_type_node),
+            generic_params=generic_args_node
         )
 
         # The sym must be created here to make recursive calls work without polluting the arg scope
@@ -1170,7 +1203,7 @@ class CompCtx(lark.visitors.Interpreter):
         # TODO: Make this work for generics later
         self.fn_ret_type_stack.append(ret_type)
 
-        body_node: NodeBlockStmt = self.visit(tree.children[3], self.get_infer_type())
+        body_node: NodeBlockStmt = self.visit(tree.children[4], self.get_infer_type())
         assert isinstance(body_node, NodeBlockStmt)
 
         # TODO: Simplify checks, we can rely on the fact that it has to be transformed into `return x`
@@ -1181,7 +1214,7 @@ class CompCtx(lark.visitors.Interpreter):
             elif isinstance(last_body_node, NodeReturn):
                 pass # return is already checked
             elif last_body_node.type.kind in literal_types:
-                body_node = self.visit(tree.children[3], ret_type)
+                body_node = self.visit(tree.children[4], ret_type)
                 last_body_node = body_node.children[-1]
                 if last_body_node.type.kind in builtin_userspace_types:
                     assert last_body_node.type.types_compatible(ret_type), f"Invalid return expression type {last_body_node.type.sym.render()} for return type {ret_type.sym.render()}"
@@ -1201,6 +1234,8 @@ class CompCtx(lark.visitors.Interpreter):
 
         sym.type = fn_type
 
+        # TODO: Rework passes a bit to make checking the substituted body possible later
+        # For now we can store the uninstantiated tree and cheat by using a foreign scope to use CompCtx
         res = NodeFnDefinition(sym, args_node, body_node, self.get_unit_type())
         sym.definition_node = res
         return res
@@ -1290,6 +1325,22 @@ class CompCtx(lark.visitors.Interpreter):
         return result
 
 
+class GenericCache:
+    def __init__(self, module: Module) -> None:
+        # list of tuple[uninstantiated, list[substitution], instantiated]
+        # nodes are used for substitutions because a generic param may contain a value instead of a type
+        self._cache = list[tuple[Symbol, list[Node], Symbol]]
+        self.module = module
+
+    def _substitute_generic_params(self, uninstantiated: Node, substitutions: list[tuple[Symbol, Node]]):
+        ## Substitutes the symbol in substitutions with the Node
+        substituted = copy(uninstantiated)
+
+    def gen_inst(self, uninstantiated: Symbol, substitutions: list[Node]) -> Symbol:
+        assert len(uninstantiated.type.generic_args) == len(substitutions)
+        uninst_node = uninstantiated.definition_node
+
+
 class Module:
     def __init__(self, name: str, id: int, contents: str, graph: ModuleGraph) -> None:
         self.graph = graph
@@ -1302,8 +1353,9 @@ class Module:
         self.hash = hashlib.md5(contents.encode()).digest()
         self.lark_tree = SerqParser().parse(contents, display=False)
         self.ast: Node = None
-        # mapping of (name, dict[params]) -> Type
-        self.generic_cache: dict[tuple[str, dict[Symbol, Type]], Type] = {}
+        # A module stores all generics it instantiates.
+        # This will make comparisons between modules more expensive but it has the advantage that parallel compilation will be easier down the road.
+        self.generic_cache = GenericCache(self)
 
     def lookup_toplevel(self, name: str) -> Optional[Symbol]:
         return self.global_scope.lookup(name, shallow=True)

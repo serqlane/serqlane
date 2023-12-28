@@ -1,8 +1,11 @@
 start: statement*
 
+// TODO: Constrained params
+generic_params: "<" identifier ("," identifier)* ">"
+
 
 // TODO: generics for both types and functions
-struct_definition: "struct" identifier "{" [struct_field (_TERMINATOR struct_field)*] "}"
+struct_definition: "struct" identifier [generic_params] "{" [struct_field (_TERMINATOR struct_field)*] "}"
 struct_field: identifier user_type // TODO: default values
 
 // rust terminology, wrong
@@ -14,7 +17,7 @@ alias_definition: "alias" identifier "=" _type
 distinct_definition: "distinct" identifier "=" _type
 
 
-fn_definition: "fn" identifier fn_definition_args [return_user_type] block_stmt
+fn_definition: "fn" identifier [generic_params] fn_definition_args [return_user_type] block_stmt
 fn_definition_args: "(" [fn_definition_arg ("," fn_definition_arg)*] ")"
 fn_definition_arg: identifier user_type
 
@@ -45,7 +48,11 @@ _block: "{" statement* "}" // TODO: There is no such thing as a block expression
 while_stmt: "while" expression block_stmt
 if_stmt: "if" expression block_stmt ["else" block_stmt]
 
-expression: literal | identifier | binary_expression | unary_expression | grouped_expression | fn_call_expr | block_expression
+expression: generic_instantiation | literal | identifier | binary_expression | unary_expression | grouped_expression | fn_call_expr | block_expression
+
+// Generics are a second class citizen for now, instantiating them first class would be hard
+generic_instantiation: identifier generic_params
+
 grouped_expression: "(" expression ")"
 
 
