@@ -1006,7 +1006,7 @@ class CompCtx:
         return NodeAssignment(lhs, rhs, self.get_unit_type())
 
     def let_stmt(self, tree: Tree, expected_type: Type) -> NodeLet:
-        assert tree.data == "let_stmt"
+        assert tree.data == "let_stmt", tree.data
         mut_node = tree.children[0]
 
         # currently the only modifier
@@ -1067,7 +1067,7 @@ class CompCtx:
         )
 
     def return_stmt(self, tree: Tree, expected_type: Type) -> NodeReturn:
-        assert tree.data == "return_stmt"
+        assert tree.data == "return_stmt", tree.data
         assert len(self.fn_ret_type_stack) > 0, "Return outside of a function"
         # TODO: Make sure this passes type checks
         expr = None
@@ -1079,7 +1079,7 @@ class CompCtx:
         return NodeReturn(expr=expr, type=self.get_unit_type())
 
     def alias_definition(self, tree: Tree, expected_type: Type) -> NodeAliasDefinition:
-        assert tree.data == "alias_definition"
+        assert tree.data == "alias_definition", tree.data
         assert expected_type.kind == TypeKind.unit
 
         src = self.identifier(tree.children[1], None)
@@ -1097,7 +1097,7 @@ class CompCtx:
         return res_node
 
     def struct_field(self, tree: Tree, expected_type: Type) -> NodeStructField:
-        assert tree.data == "struct_field"
+        assert tree.data == "struct_field", tree.data
         assert expected_type.kind == TypeKind.unit
 
         ident = tree.children[0].children[0].value
@@ -1111,7 +1111,7 @@ class CompCtx:
         return NodeStructField(sym, typ_sym_node.symbol.type)
 
     def struct_definition(self, tree: Tree, expected_type: Type) -> NodeStructDefinition:
-        assert tree.data == "struct_definition"
+        assert tree.data == "struct_definition", tree.data
         assert expected_type.kind == TypeKind.unit
         ident = tree.children[0].children[0].value
         sym = self.current_scope.put_type(ident)
@@ -1131,7 +1131,7 @@ class CompCtx:
         return def_node
 
     def fn_definition_args(self, tree: Tree, expected_type: Type) -> NodeFnParameters:
-        assert tree.data == "fn_definition_args"
+        assert tree.data == "fn_definition_args", tree.data
         assert expected_type.kind == TypeKind.unit
 
         params = []
@@ -1318,6 +1318,7 @@ class CompCtx:
             assert False
 
     def start(self, tree: Tree, expected_type: Type) -> NodeStmtList:
+        assert tree.data == "start", tree.data
         result = NodeStmtList(self.current_scope.lookup_type("unit", shallow=True))
         for child in tree.children:
             node = self.statement(child, self.get_unit_type())
