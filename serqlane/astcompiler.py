@@ -40,7 +40,7 @@ class Node:
         self.type = type
 
     def render(self) -> str:
-        raise NotImplementedError(f"{type(self)}")
+        raise SerqInternalError(f"Render isn't implemented for node type {type(self)}")
 
 class NodeEmpty(Node):
     def __init__(self, type: Type) -> None:
@@ -507,24 +507,24 @@ class Type:
             
             case TypeKind.static:
                 # TODO: static is allowed to be turned into the corresponding non-static version but not vice versa
-                raise ValueError("statics aren't ready yet")
+                raise SerqInternalError("statics aren't ready yet")
 
             case TypeKind.alias:
                 # TODO: Generic aliases. Need to map potentially new generic params around and then reduce the type if required
-                raise ValueError("aliases aren't ready yet")
+                raise SerqInternalError("aliases aren't ready yet")
             
             case TypeKind.distinct:
                 # TODO: distinct generics are tough
-                raise ValueError("distincts aren't ready yet")
+                raise SerqInternalError("distincts aren't ready yet")
             
 
             # user types
 
             case TypeKind.generic_inst:
-                raise ValueError("generic instances aren't ready yet")
+                raise SerqInternalError("generic instances aren't ready yet")
 
             case TypeKind.generic_type:
-                raise ValueError("generic types aren't ready yet")
+                raise SerqInternalError("generic types aren't ready yet")
 
             case TypeKind.type | TypeKind.concrete_type:
                 if id(self) == id(other): # TODO: It should NOT use python id, should use a concrete id or something. Need a type cache for that
@@ -544,7 +544,7 @@ class Type:
                 return other.kind in {TypeKind.literal_string, TypeKind.string}
 
             case _:
-                raise ValueError(f"Unimplemented type comparison: {self.kind}")
+                raise SerqInternalError(f"Unimplemented type comparison: {self.kind}")
 
     def instantiate_literal(self, graph: ModuleGraph) -> Type:
         """
@@ -561,7 +561,7 @@ class Type:
             case TypeKind.literal_string:
                 return graph.builtin_scope.lookup_type("string")
             case _:
-                raise ValueError(f"Forgot a literal type: {self.kind}")
+                raise SerqInternalError(f"Forgot a literal type: {self.kind}")
 
     def render(self) -> str:
         # TODO: match on sets?
@@ -573,7 +573,7 @@ class Type:
         elif self.kind == TypeKind.type:
             return self.sym.definition_node.render()
         else:
-            raise NotImplementedError(self)
+            raise SerqInternalError(f"Render isn't implemented for type kind {self.kind}")
 
 
 class Scope:
@@ -642,7 +642,7 @@ class Scope:
 
     def put_magic(self, name: str) -> Symbol:
         assert type(name) == str
-        if self.lookup(name, shallow=True): raise ValueError(f"redefinition of magic sym: {name}")
+        if self.lookup(name, shallow=True): raise SerqInternalError(f"redefinition of magic sym: {name}")
         result = Symbol(self.module_graph.sym_id_gen.next(), name=name, magic=True)
         self._local_syms.append(result)
         return result
@@ -815,7 +815,7 @@ class CompCtx:
                 case TypeKind.literal_string:
                     value = ""
                 case _:
-                    raise RuntimeError("Unsupported empty literal")
+                    raise SerqInternalError("Unsupported empty literal")
 
         if literal_kind is TypeKind.literal_string:
             value = self.resolve_escape_sequence(value)
@@ -959,7 +959,7 @@ class CompCtx:
 
                 return NodeDotAccess(lhs, matching_field_sym)
             case _:
-                raise ValueError(f"Unimplemented binary op: {op}")
+                raise SerqInternalError(f"Unimplemented binary op: {op}")
 
 
     def identifier(self, tree: Tree, expected_type: Type) -> NodeSymbol:
@@ -1001,7 +1001,7 @@ class CompCtx:
                 if not leftmost.symbol.mutable:
                     report_immutable(leftmost.symbol)
             case _:
-                raise NotImplementedError
+                raise NotImplementedError()
         
         return NodeAssignment(lhs, rhs, self.get_unit_type())
 
