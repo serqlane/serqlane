@@ -6,7 +6,6 @@ from typing import Any, Optional, Iterator
 import hashlib
 import textwrap
 
-import lark.visitors
 from lark import Token, Tree
 
 from serqlane.parser import SerqParser
@@ -31,13 +30,17 @@ RESERVED_KEYWORDS = [
     "struct",
 ]
 
+
+class SerqInternalError(Exception): ...
+
+
 class Node:
     def __init__(self, type: Type) -> None:
         assert type != None and isinstance(type, Type)
         self.type = type
 
     def render(self) -> str:
-        raise NotImplementedError(f"{type(self)}")
+        raise SerqInternalError(f"Render isn't implemented for node type {type(self)}")
 
 class NodeEmpty(Node):
     def __init__(self, type: Type) -> None:
@@ -504,24 +507,24 @@ class Type:
             
             case TypeKind.static:
                 # TODO: static is allowed to be turned into the corresponding non-static version but not vice versa
-                raise ValueError("statics aren't ready yet")
+                raise SerqInternalError("statics aren't ready yet")
 
             case TypeKind.alias:
                 # TODO: Generic aliases. Need to map potentially new generic params around and then reduce the type if required
-                raise ValueError("aliases aren't ready yet")
+                raise SerqInternalError("aliases aren't ready yet")
             
             case TypeKind.distinct:
                 # TODO: distinct generics are tough
-                raise ValueError("distincts aren't ready yet")
+                raise SerqInternalError("distincts aren't ready yet")
             
 
             # user types
 
             case TypeKind.generic_inst:
-                raise ValueError("generic instances aren't ready yet")
+                raise SerqInternalError("generic instances aren't ready yet")
 
             case TypeKind.generic_type:
-                raise ValueError("generic types aren't ready yet")
+                raise SerqInternalError("generic types aren't ready yet")
 
             case TypeKind.type | TypeKind.concrete_type:
                 if id(self) == id(other): # TODO: It should NOT use python id, should use a concrete id or something. Need a type cache for that
@@ -541,7 +544,7 @@ class Type:
                 return other.kind in {TypeKind.literal_string, TypeKind.string}
 
             case _:
-                raise ValueError(f"Unimplemented type comparison: {self.kind}")
+                raise SerqInternalError(f"Unimplemented type comparison: {self.kind}")
 
     def instantiate_literal(self, graph: ModuleGraph) -> Type:
         """
@@ -558,7 +561,7 @@ class Type:
             case TypeKind.literal_string:
                 return graph.builtin_scope.lookup_type("string")
             case _:
-                raise ValueError(f"Forgot a literal type: {self.kind}")
+                raise SerqInternalError(f"Forgot a literal type: {self.kind}")
 
     def render(self) -> str:
         # TODO: match on sets?
@@ -570,7 +573,7 @@ class Type:
         elif self.kind == TypeKind.type:
             return self.sym.definition_node.render()
         else:
-            raise NotImplementedError(self)
+            raise SerqInternalError(f"Render isn't implemented for type kind {self.kind}")
 
 
 class Scope:
@@ -639,7 +642,7 @@ class Scope:
 
     def put_magic(self, name: str) -> Symbol:
         assert type(name) == str
-        if self.lookup(name, shallow=True): raise ValueError(f"redefinition of magic sym: {name}")
+        if self.lookup(name, shallow=True): raise SerqInternalError(f"redefinition of magic sym: {name}")
         result = Symbol(self.module_graph.sym_id_gen.next(), name=name, magic=True)
         self._local_syms.append(result)
         return result
@@ -675,7 +678,7 @@ class Scope:
         ...
 
 
-class CompCtx(lark.visitors.Interpreter):
+class CompCtx:
     def __init__(self, module: Module, graph: ModuleGraph) -> None:
         self.module = module
         self.graph = graph
@@ -695,34 +698,41 @@ class CompCtx(lark.visitors.Interpreter):
     def get_unit_type(self) -> Type:
         return self.current_scope.lookup_type("unit", shallow=True)
 
-    # overrides
-    def visit(self, tree: Tree, expected_type: Type) -> Node:
-        return self._visit_tree(tree, expected_type)
-
-    def _visit_tree(self, tree: Tree, expected_type: Type):
-        f = getattr(self, tree.data)
-        wrapper = getattr(f, 'visit_wrapper', None)
-        if wrapper is not None:
-            raise NotImplementedError()
-            #return f.visit_wrapper(f, tree.data, tree.children, tree.meta)
-        else:
-            return f(tree, expected_type)
-    
-    def visit_children(self, tree: Tree, expected_type: Type) -> list:
-        return [self._visit_tree(child, expected_type) if isinstance(child, Tree) else child
-                for child in tree.children]
-
-    def __default__(self, tree, expected_type: Type):
-        raise ValueError(f"{tree=}")
-        return self.visit_children(tree, expected_type)
-
     # new functions
-    def statement(self, tree: Tree, expected_type: Type):
+    def statement(self, tree: Tree, expected_type: Type) -> Node:
+        assert tree.data == "statement", tree.data
         assert len(tree.children) == 1, f"{len(tree.children)} --- {tree.children=}"
-        return self.visit(tree.children[0], expected_type)
+
+        child = tree.children[0]
+        match child.data:
+            case "fn_definition":
+                return self.fn_definition(child, expected_type)
+            case "expression":
+                return self.expression(child, expected_type)
+            case "struct_definition":
+                return self.struct_definition(child, expected_type)
+            case "alias_definition":
+                return self.alias_definition(child, expected_type)
+            case "let_stmt":
+                return self.let_stmt(child, expected_type)
+            case "return_stmt":
+                return self.return_stmt(child, expected_type)
+            case "assignment":
+                return self.assignment(child, expected_type)
+            case "if_stmt":
+                return self.if_stmt(child, expected_type)
+            case "while_stmt":
+                return self.while_stmt(child, expected_type)
+            case "break_stmt" | "continue_stmt":
+                return self.handle_break_or_continue(child, expected_type)
+            case "block_stmt": 
+                return self.handle_block(child, expected_type)
+            case _:
+                raise SerqInternalError(f"Unimplemented statement type: {child.data}")
 
 
-    def handle_break_or_continue(self, tree: Tree, expected_type: Type):
+    def handle_break_or_continue(self, tree: Tree, expected_type: Type) -> NodeBreak | NodeContinue:
+        assert tree.data in ["break_stmt", "continue_stmt"], tree.data
         assert expected_type.kind == TypeKind.unit
         assert len(tree.children) == 0
         if self.in_loop_counter < 1:
@@ -731,50 +741,41 @@ class CompCtx(lark.visitors.Interpreter):
             return NodeBreak(self.get_unit_type())
         elif tree.data == "continue_stmt":
             return NodeContinue(self.get_unit_type())
-        else:
-            raise ValueError(f"Somehow a bad break or continue has been given: {tree.data}")
-        
-
-    def break_stmt(self, tree: Tree, expected_type: Type):
-        return self.handle_break_or_continue(tree, expected_type)
-
-    def continue_stmt(self, tree: Tree, expected_type: Type):
-        return self.handle_break_or_continue(tree, expected_type)
 
 
-    def while_stmt(self, tree: Tree, expected_type: Type):
+    def while_stmt(self, tree: Tree, expected_type: Type) -> NodeWhileStmt:
+        assert tree.data == "while_stmt", tree.data
         assert expected_type.kind == TypeKind.unit
         # This has to use the outer scope, so a new scope is only opened once this has been checked in full
-        while_cond = self.visit(tree.children[0], self.current_scope.lookup_type("bool", shallow=True))
+        while_cond = self.expression(tree.children[0], self.current_scope.lookup_type("bool", shallow=True))
         assert while_cond.type.kind == TypeKind.bool
 
         # block_stmt opens a scope
         self.in_loop_counter += 1 # needed to check if break and continue are valid
-        body = self.visit(tree.children[1], self.get_unit_type())
+        body = self.handle_block(tree.children[1], self.get_unit_type())
         self.in_loop_counter -= 1
-        assert isinstance(body, NodeBlockStmt)
 
         return NodeWhileStmt(while_cond, body, self.get_unit_type())
 
-    def if_stmt(self, tree: Tree, expected_type: Type):
+    def if_stmt(self, tree: Tree, expected_type: Type) -> NodeIfStmt:
+        assert tree.data == "if_stmt", tree.data
         assert expected_type.kind == TypeKind.unit # TODO: if expressions are not unit, need to guarantee valid else branch
         # Same scoping story as in while_stmt
-        if_cond = self.visit(tree.children[0], self.current_scope.lookup_type("bool", shallow=True))
+        if_cond = self.expression(tree.children[0], self.current_scope.lookup_type("bool", shallow=True))
         assert if_cond.type.kind == TypeKind.bool
-        if_body = self.visit(tree.children[1], self.get_unit_type())
-        assert isinstance(if_body, NodeBlockStmt)
+        if_body = self.handle_block(tree.children[1], self.get_unit_type())
 
         else_body = None
         if tree.children[2] != None:
-            else_body = self.visit(tree.children[2], self.get_unit_type())
-            assert isinstance(else_body, NodeBlockStmt)
+            else_body = self.handle_block(tree.children[2], self.get_unit_type())
         else:
             # Always inject an empty else case if none is provided
             else_body = NodeBlockStmt(self.get_unit_type())
         return NodeIfStmt(if_cond, if_body, else_body, self.get_unit_type()) # TODO: Pass along branch types once they exist
 
 
-    def block_stmt(self, tree: Tree, expected_type: Type):
+    def handle_block(self, tree: Tree, expected_type: Type) -> NodeBlockStmt:
+        assert tree.data in ["block_stmt", "block_expression"], tree.data
         self.open_scope()
         if len(tree.children) == 0:
             return NodeBlockStmt(self.get_unit_type())
@@ -786,24 +787,22 @@ class CompCtx(lark.visitors.Interpreter):
         (tree_children, last_child) = (tree.children[0:len(tree.children)-1], tree.children[-1])
         for child in tree_children:
             # All but the last have to be unit typed
-            result.add(self.visit(child, self.get_unit_type()))
+            result.add(self.statement(child, self.get_unit_type()))
 
         if expected_type != None:
-            result.add(self.visit(last_child, expected_type))
+            result.add(self.statement(last_child, expected_type))
             assert expected_type.types_compatible(result.children[-1].type), f"Expected type {expected_type.sym.render()} for block but got {result.children[-1].type.sym.render()}"
             result.type = result.children[-1].type
         elif len(result.children) > 0:
-            result.add(self.visit(last_child, None))
+            result.add(self.statement(last_child, None))
             result.type = result.children[-1].type
 
         self.close_scope()
         return result
-    
-    def block_expression(self, tree: Tree, expected_type: Type):
-        return self.block_stmt(tree, expected_type)
 
-    def grouped_expression(self, tree: Tree, expected_type: Type):
-        inner = self.visit(tree.children[0], expected_type)
+    def grouped_expression(self, tree: Tree, expected_type: Type) -> NodeGrouped:
+        assert tree.data == "grouped_expression", tree.data
+        inner = self.expression(tree.children[0], expected_type)
         return NodeGrouped(inner, inner.type)
 
 
@@ -818,7 +817,7 @@ class CompCtx(lark.visitors.Interpreter):
                 case TypeKind.literal_string:
                     value = ""
                 case _:
-                    raise RuntimeError("Unsupported empty literal")
+                    raise SerqInternalError("Unsupported empty literal")
 
         if literal_kind is TypeKind.literal_string:
             value = self.resolve_escape_sequence(value)
@@ -836,26 +835,31 @@ class CompCtx(lark.visitors.Interpreter):
     def resolve_escape_sequence(value: str) -> str:
         return value.replace('\\"', '"')
 
-    def integer(self, tree: Tree, expected_type: Type):
+    def integer(self, tree: Tree, expected_type: Type) -> NodeIntLit:
+        assert tree.data == "integer", tree.data
         return self.handle_literal(tree, expected_type, "int64", TypeKind.literal_int, NodeIntLit, int)
     
-    def decimal(self, tree: Tree, expected_type: Type):
+    def decimal(self, tree: Tree, expected_type: Type) -> NodeFloatLit:
+        assert tree.data == "decimal", tree.data
         return self.handle_literal(tree, expected_type, "float64", TypeKind.literal_float, NodeFloatLit, float)
     
-    def bool(self, tree: Tree, expected_type: Type):
+    def bool(self, tree: Tree, expected_type: Type) -> NodeBoolLit:
+        assert tree.data == "bool", tree.data
         return self.handle_literal(tree, expected_type, "bool", TypeKind.literal_bool, NodeBoolLit, lambda x: x == "true")
     
-    def string(self, tree: Tree, expected_type: Type):
+    def string(self, tree: Tree, expected_type: Type) -> NodeStringLit:
+        assert tree.data == "string", tree.data
         return self.handle_literal(tree, expected_type, "string", TypeKind.literal_string, NodeStringLit, str)
 
 
-    def binary_expression(self, tree: Tree, expected_type: Type):
-        lhs = self.visit(tree.children[0], None)
+    def binary_expression(self, tree: Tree, expected_type: Type) -> NodeBinaryExpr:
+        assert tree.data == "binary_expression", tree.data
+        lhs = self.expression(tree.children[0], None)
         # TODO: Can the symbol be captured somehow?
         op = tree.children[1].data.value
         # a dot expression does not work by the same type rules
         if op != "dot":
-            rhs = self.visit(tree.children[2], None)
+            rhs = self.expression(tree.children[2], None)
 
             # TODO: Dot expr
             if not lhs.type.types_compatible(rhs.type):
@@ -870,23 +874,23 @@ class CompCtx(lark.visitors.Interpreter):
 
             # if there is a known type, spread it around
             if lhs.type.kind in literal_types and rhs.type.kind not in literal_types:
-                lhs = self.visit(tree.children[0], rhs.type)
+                lhs = self.expression(tree.children[0], rhs.type)
             elif rhs.type.kind in literal_types and lhs.type.kind not in literal_types:
-                rhs = self.visit(tree.children[2], lhs.type)
+                rhs = self.expression(tree.children[2], lhs.type)
             
             # both literal
             else:
                 # if possible we ask for help from expected_type
                 if expected_type != None and expr_type.types_compatible(expected_type):
-                    lhs = self.visit(tree.children[0], expected_type)
-                    rhs = self.visit(tree.children[2], expected_type)
+                    lhs = self.expression(tree.children[0], expected_type)
+                    rhs = self.expression(tree.children[2], expected_type)
                     assert lhs.type.types_compatible(rhs.type)
                     expr_type = lhs.type
 
                 # no expectation, let them infer their own types
                 elif expected_type == None:
-                    lhs = self.visit(tree.children[0], self.get_infer_type())
-                    rhs = self.visit(tree.children[2], self.get_infer_type())
+                    lhs = self.expression(tree.children[0], self.get_infer_type())
+                    rhs = self.expression(tree.children[2], self.get_infer_type())
                     assert lhs.type.types_compatible(rhs.type)
                     expr_type = lhs.type
                 
@@ -942,7 +946,7 @@ class CompCtx(lark.visitors.Interpreter):
 
             case "dot":
                 # TODO: Has to use the type of rhs for node type, can only be done once types and field lookup exist
-                lhs = self.visit(tree.children[0], None)
+                lhs = self.expression(tree.children[0], None)
                 assert lhs.type.kind == TypeKind.type, f"Dot operations for type {lhs.type.sym.render()} are not yet allowed" # TODO: Allow any type here, required for universal function calling syntax
                 rhs = tree.children[2].children[0].value
 
@@ -957,10 +961,11 @@ class CompCtx(lark.visitors.Interpreter):
 
                 return NodeDotAccess(lhs, matching_field_sym)
             case _:
-                raise ValueError(f"Unimplemented binary op: {op}")
+                raise SerqInternalError(f"Unimplemented binary op: {op}")
 
 
-    def identifier(self, tree: Tree, expected_type: Type):
+    def identifier(self, tree: Tree, expected_type: Type) -> NodeSymbol:
+        assert tree.data == "identifier", tree.data
         val = tree.children[0].value
         sym = self.current_scope.lookup(val)
         if sym:
@@ -970,18 +975,17 @@ class CompCtx(lark.visitors.Interpreter):
         # TODO: Error reporting
         raise ValueError(f"Bad identifier: {val}")
 
-    def return_user_type(self, tree: Tree, expected_type: Type):
-        return self.user_type(tree, expected_type)
+    def user_type(self, tree: Tree, expected_type: Type) -> NodeSymbol:
+        assert tree.data in ["user_type", "return_user_type"], tree.data
+        return self.identifier(tree.children[0], None) # TODO: Enforce `type` metatype
 
-    def user_type(self, tree: Tree, expected_type: Type):
-        return self.visit(tree.children[0], None) # TODO: Enforce `type` metatype
-
-    def assignment(self, tree: Tree, expected_type: Type):
+    def assignment(self, tree: Tree, expected_type: Type) -> NodeAssignment:
+        assert tree.data == "assignment", tree.data
         # TODO: Assignments could technically act as expressions too
         assert expected_type.kind == TypeKind.unit
 
-        lhs = self.visit(tree.children[0], None)
-        rhs = self.visit(tree.children[1], lhs.type)
+        lhs = self.expression(tree.children[0], None)
+        rhs = self.expression(tree.children[1], lhs.type)
         assert lhs.type.types_compatible(rhs.type)
 
         def report_immutable(sym: Symbol):
@@ -999,11 +1003,12 @@ class CompCtx(lark.visitors.Interpreter):
                 if not leftmost.symbol.mutable:
                     report_immutable(leftmost.symbol)
             case _:
-                raise NotImplementedError
+                raise NotImplementedError()
         
         return NodeAssignment(lhs, rhs, self.get_unit_type())
 
-    def let_stmt(self, tree: Tree, expected_type: Type):
+    def let_stmt(self, tree: Tree, expected_type: Type) -> NodeLet:
+        assert tree.data == "let_stmt", tree.data
         mut_node = tree.children[0]
 
         # currently the only modifier
@@ -1024,12 +1029,11 @@ class CompCtx(lark.visitors.Interpreter):
             type_tree = tree.children[f]
             # TODO: Return an empty node with empty type
             # TODO: Have expected type be `type` metatype
-            type_sym = self.visit(type_tree, None)
-            assert isinstance(type_sym, NodeSymbol)
+            type_sym = self.user_type(type_tree, None)
             f += 1
         
         val_node_expected_type = type_sym.type if type_sym != None else self.get_infer_type()
-        val_node = self.visit(tree.children[f], val_node_expected_type)
+        val_node = self.expression(tree.children[f], val_node_expected_type)
         if val_node.type.kind == TypeKind.unit:
             raise ValueError(f"Type `{val_node.type.kind.name}` is not valid for `let`")
 
@@ -1064,22 +1068,23 @@ class CompCtx(lark.visitors.Interpreter):
             type=self.get_unit_type()
         )
 
-    def return_stmt(self, tree: Tree, expected_type: Type):
+    def return_stmt(self, tree: Tree, expected_type: Type) -> NodeReturn:
+        assert tree.data == "return_stmt", tree.data
         assert len(self.fn_ret_type_stack) > 0, "Return outside of a function"
         # TODO: Make sure this passes type checks
         expr = None
         if tree.children[0] != None:
-            expr = self.visit(tree.children[0], self.fn_ret_type_stack[-1])
+            expr = self.expression(tree.children[0], self.fn_ret_type_stack[-1])
         else:
             expr = NodeEmpty(self.fn_ret_type_stack[-1])        
         assert self.fn_ret_type_stack[-1].types_compatible(expr.type), f"Incompatible return({expr.type.sym.render()}) for function type({self.fn_ret_type_stack[-1].render()})"
         return NodeReturn(expr=expr, type=self.get_unit_type())
 
-    def alias_definition(self, tree: Tree, expected_type: Type):
+    def alias_definition(self, tree: Tree, expected_type: Type) -> NodeAliasDefinition:
+        assert tree.data == "alias_definition", tree.data
         assert expected_type.kind == TypeKind.unit
 
-        src = self.visit(tree.children[1], None)
-        assert isinstance(src, NodeSymbol)
+        src = self.identifier(tree.children[1], None)
 
         alias_name = tree.children[0].children[0].value
         alias_sym = self.current_scope.put(alias_name)
@@ -1093,20 +1098,22 @@ class CompCtx(lark.visitors.Interpreter):
         alias_sym.definition_node = res_node
         return res_node
 
-    def struct_field(self, tree: Tree, expected_type: Type):
+    def struct_field(self, tree: Tree, expected_type: Type) -> NodeStructField:
+        assert tree.data == "struct_field", tree.data
         assert expected_type.kind == TypeKind.unit
 
         ident = tree.children[0].children[0].value
         sym = self.current_scope.put_let(ident, checked=True, shallow=True)
 
-        typ_sym_node = self.visit(tree.children[1], None)
-        assert isinstance(typ_sym_node, NodeSymbol) # TODO: Assert that this is actually a type sym. Current system isn't ready yet
+        # TODO: Assert that this is actually a type sym. Current system isn't ready yet
+        typ_sym_node = self.user_type(tree.children[1], None)
 
         sym.type = typ_sym_node.type
 
         return NodeStructField(sym, typ_sym_node.symbol.type)
 
-    def struct_definition(self, tree: Tree, expected_type: Type):
+    def struct_definition(self, tree: Tree, expected_type: Type) -> NodeStructDefinition:
+        assert tree.data == "struct_definition", tree.data
         assert expected_type.kind == TypeKind.unit
         ident = tree.children[0].children[0].value
         sym = self.current_scope.put_type(ident)
@@ -1117,7 +1124,7 @@ class CompCtx(lark.visitors.Interpreter):
             for field_node in tree.children[1:]:
                 # TODO: Recursion check. Recursion is currently unrestricted and permits infinite recursion
                 #   For proper recursion handling we also gotta ensure we don't try to access a type that is currently being processed like will be the case with mutual recursion
-                field = self.visit(field_node, self.get_unit_type())
+                field = self.struct_field(field_node, self.get_unit_type())
                 fields.append(field)
             self.close_scope()
 
@@ -1125,7 +1132,8 @@ class CompCtx(lark.visitors.Interpreter):
         sym.definition_node = def_node
         return def_node
 
-    def fn_definition_args(self, tree: Tree, expected_type: Type):
+    def fn_definition_args(self, tree: Tree, expected_type: Type) -> NodeFnParameters:
+        assert tree.data == "fn_definition_args", tree.data
         assert expected_type.kind == TypeKind.unit
 
         params = []
@@ -1138,13 +1146,14 @@ class CompCtx(lark.visitors.Interpreter):
             # TODO: Mutable args
             ident = child.children[0].children[0].value
             sym = self.current_scope.put_let(ident, shallow=True) # effectively a let that permits shallow shadowing
-            type_node = self.visit(child.children[1], None)
+            type_node = self.user_type(child.children[1], None)
             sym.type = type_node.symbol.type # TODO: This is not clean at all
             params.append((NodeSymbol(sym, sym.type), type_node))
 
         return NodeFnParameters(params)
 
-    def fn_definition(self, tree: Tree, expected_type: Type):
+    def fn_definition(self, tree: Tree, expected_type: Type) -> NodeFnDefinition:
+        assert tree.data == "fn_definition", tree.data
         assert expected_type.kind == TypeKind.unit
 
         ident_node = tree.children[0]
@@ -1154,13 +1163,11 @@ class CompCtx(lark.visitors.Interpreter):
         # must open a scope here to isolate the params
         self.open_scope()
         
-        args_node = self.visit(tree.children[1], self.get_unit_type())
-        assert isinstance(args_node, NodeFnParameters)
+        args_node = self.fn_definition_args(tree.children[1], self.get_unit_type())
         ret_type_node = NodeSymbol(self.get_unit_type().sym, self.get_unit_type())
         ret_type = ret_type_node.type
         if tree.children[2] != None:
-            ret_type_node = self.visit(tree.children[2], None)
-            assert isinstance(ret_type_node, NodeSymbol)
+            ret_type_node = self.user_type(tree.children[2], None)
             ret_type = ret_type_node.type # TODO: Fix this nonsense, type should be `type`, not whatever the type evaluates to
 
         # TODO: Use a type cache to load function with the same type from it for easier matching
@@ -1177,8 +1184,7 @@ class CompCtx(lark.visitors.Interpreter):
         # TODO: Make this work for generics later
         self.fn_ret_type_stack.append(ret_type)
 
-        body_node: NodeBlockStmt = self.visit(tree.children[3], self.get_infer_type())
-        assert isinstance(body_node, NodeBlockStmt)
+        body_node = self.handle_block(tree.children[3], self.get_infer_type())
 
         # TODO: Simplify checks, we can rely on the fact that it has to be transformed into `return x`
         if len(body_node.children) > 0:
@@ -1188,7 +1194,7 @@ class CompCtx(lark.visitors.Interpreter):
             elif isinstance(last_body_node, NodeReturn):
                 pass # return is already checked
             elif last_body_node.type.kind in literal_types:
-                body_node = self.visit(tree.children[3], ret_type)
+                body_node = self.handle_block(tree.children[3], ret_type)
                 last_body_node = body_node.children[-1]
                 if last_body_node.type.kind in builtin_userspace_types:
                     assert last_body_node.type.types_compatible(ret_type), f"Invalid return expression type {last_body_node.type.sym.render()} for return type {ret_type.sym.render()}"
@@ -1212,15 +1218,16 @@ class CompCtx(lark.visitors.Interpreter):
         sym.definition_node = res
         return res
 
-    def fn_call_expr(self, tree: Tree, expected_type: Type):
+    def fn_call_expr(self, tree: Tree, expected_type: Type) -> NodeFnCall:
+        assert tree.data == "fn_call_expr", tree.data
         # TODO: Once overloads/methods are in, this must scan visible symbols and retrieve a list. Handled in identifier though
         unresolved_args: list[Node] = []
         if tree.children[1] != None:
             # child 0 is None in empty calls i.e f()
             if tree.children[1].children[0] is not None:
                 for i in range(0, len(tree.children[1].children)):
-                    unresolved_args.append(self.visit(tree.children[1].children[i], self.get_infer_type()))
-        
+                    unresolved_args.append(self.expression(tree.children[1].children[i], self.get_infer_type()))
+
         callee = None
         if len(tree.children[0].children) > 0 and tree.children[0].children[0].data == "identifier":
             # TODO: Better handling, use a candidate node instead
@@ -1241,7 +1248,7 @@ class CompCtx(lark.visitors.Interpreter):
                         callee = NodeSymbol(fn, fn.type)
                         break
         else:
-            callee = self.visit(tree.children[0], None)
+            callee = self.expression(tree.children[0], None)
         # TODO: allow non-symbol calls i.e. function pointers
         assert callee != None, f"No matching overload found for {tree.children[0].children[0].children[0]}"
         assert isinstance(callee, NodeSymbol), "can only call symbols"
@@ -1266,7 +1273,7 @@ class CompCtx(lark.visitors.Interpreter):
                 if tree.children[1].children[0] is not None:
                     assert len(tree.children[1].children) == len(arg_types)
                     for i in range(0, len(arg_types)):
-                        params.append(self.visit(tree.children[1].children[i], arg_types[i]))
+                        params.append(self.expression(tree.children[1].children[i], arg_types[i]))
             else:
                 assert len(arg_types) == 0
 
@@ -1276,23 +1283,47 @@ class CompCtx(lark.visitors.Interpreter):
             type=ret_type
         )
 
-    def expression(self, tree: Tree, expected_type: Type):
+    def expression(self, tree: Tree, expected_type: Type) -> Node:
+        assert tree.data == "expression", tree.data
         # TODO: Handle longer expressions?
         assert len(tree.children) == 1
         result = []
         tree: Tree = tree
         for child in tree.children:
-            result.append(self.visit(child, expected_type))
+            match child.data:
+                case "fn_call_expr":
+                    result.append(self.fn_call_expr(child, expected_type))
+                case "binary_expression":
+                    result.append(self.binary_expression(child, expected_type))
+                case "block_expression":
+                    result.append(self.handle_block(child, expected_type))
+                case "grouped_expression":
+                    result.append(self.grouped_expression(child, expected_type))
+
+                # TODO: Literals should expect their literal types, fixed later by sym transformations once shadows exist
+                case "bool":
+                    result.append(self.bool(child, expected_type))
+                case "integer":
+                    result.append(self.integer(child, expected_type))
+                case "decimal":
+                    result.append(self.decimal(child, expected_type))
+                case "string":
+                    result.append(self.string(child, expected_type))
+                
+                case "identifier":
+                    result.append(self.identifier(child, expected_type))
+                case _:
+                    raise SerqInternalError(f"Unimplemented expression type: {child.data}")
         if len(result) == 1:
             return result[0]
         else:
             assert False
 
-    def start(self, tree: Tree, expected_type: Type):
+    def start(self, tree: Tree, expected_type: Type) -> NodeStmtList:
+        assert tree.data == "start", tree.data
         result = NodeStmtList(self.current_scope.lookup_type("unit", shallow=True))
         for child in tree.children:
-            node = self.visit(child, self.get_unit_type())
-            assert isinstance(node, Node)
+            node = self.statement(child, self.get_unit_type())
             result.add(node)
         return result
 
@@ -1375,6 +1406,6 @@ class ModuleGraph:
         self._next_id += 1
         self.modules[name] = mod
         # TODO: Make sure the module isn't already being processed
-        ast: NodeStmtList = CompCtx(mod, self).visit(mod.lark_tree, None)
+        ast: NodeStmtList = CompCtx(mod, self).start(mod.lark_tree, None)
         mod.ast = ast
         return mod
