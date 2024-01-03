@@ -1145,7 +1145,6 @@ class CompCtx:
         return def_node
     
     def handle_deferred_fn_body(self, tree: Tree, sym: Symbol) -> NodeBlockStmt:
-        print("BUILDING FUNCTION BODY")
         self.current_deferred_ret_type = sym.type.return_type()
 
         # isolate params again
@@ -1229,40 +1228,14 @@ class CompCtx:
             data=([x[1].type for x in args_node.args], ret_type)
         )
 
+        self.close_scope()
+
         # The sym must be created here to make recursive calls work without polluting the arg scope
-        sym = self.current_scope.parent.put_function(ident, fn_type)
+        sym = self.current_scope.put_function(ident, fn_type)
         fn_type.sym = sym
 
         # TODO: Make this work for generics later
         self.defer_fn_body(sym, tree.children[3])
-        #body_node = self.handle_block(tree.children[3], self.get_infer_type())
-
-        # TODO: Handle this as part of deferred body
-        """
-        # TODO: Simplify checks, we can rely on the fact that it has to be transformed into `return x`
-        if len(body_node.children) > 0:
-            last_body_node = body_node.children[-1]
-            if last_body_node.type.kind == TypeKind.unit and not expected_type.kind == TypeKind.unit and not isinstance(last_body_node, NodeReturn):
-                assert False, f"Returning a unit type for expected type {ret_type.sym.render()} is not permitted"
-            elif isinstance(last_body_node, NodeReturn):
-                pass # return is already checked
-            elif last_body_node.type.kind in literal_types:
-                body_node = self.handle_block(tree.children[3], ret_type)
-                last_body_node = body_node.children[-1]
-                if last_body_node.type.kind in builtin_userspace_types:
-                    assert last_body_node.type.types_compatible(ret_type), f"Invalid return expression type {last_body_node.type.sym.render()} for return type {ret_type.sym.render()}"
-                body_node.children[-1] = NodeReturn(last_body_node, self.get_unit_type())
-            else:
-                assert last_body_node.type.types_compatible(ret_type), f"Invalid return expression type {last_body_node.type.sym.render()} for return type {ret_type.sym.render()}"
-                if last_body_node.type.kind == TypeKind.unit:
-                    body_node.children.append(NodeReturn(NodeEmpty(self.get_unit_type()), self.get_unit_type()))
-                else:
-                    body_node.children[-1] = NodeReturn(last_body_node, self.get_unit_type())
-        else:
-            body_node.children.append(NodeReturn(NodeEmpty(self.get_unit_type()), self.get_unit_type()))
-        """
-            
-        self.close_scope()
 
         sym.type = fn_type
 
@@ -1273,57 +1246,51 @@ class CompCtx:
     def fn_call_expr(self, tree: Tree, expected_type: Type) -> NodeFnCall:
         assert tree.data == "fn_call_expr", tree.data
         # TODO: Once overloads/methods are in, this must scan visible symbols and retrieve a list. Handled in identifier though
-        unresolved_args: list[Node] = []
-        if tree.children[1] != None:
-            # child 0 is None in empty calls i.e f()
-            if tree.children[1].children[0] is not None:
-                for i in range(0, len(tree.children[1].children)):
-                    unresolved_args.append(self.expression(tree.children[1].children[i], self.get_infer_type()))
+        passed_arg_count = len(tree.children[1].children) if tree.children[1].children[0] != None else 0
 
         callee = None
+        params = []
         if len(tree.children[0].children) > 0 and tree.children[0].children[0].data == "identifier":
             # TODO: Better handling, use a candidate node instead
             for fn in self.current_scope.iter_function_defs(tree.children[0].children[0].children[0].value):
                 if fn.type.kind == TypeKind.type:
-                    assert len(unresolved_args) == 0, "Calling a struct with arguments is not yet supported" # TODO 
+                    assert passed_arg_count == 0, "Calling a struct with arguments is not yet supported" # TODO 
                     callee = NodeSymbol(fn, fn.type)
                     break
                 else:
-                    if len(unresolved_args) != len(fn.type.function_arg_types()):
+                    if passed_arg_count != len(fn.type.function_arg_types()):
                         continue
                     matches = True
-                    for i in range(0, len(unresolved_args)):
-                        if not unresolved_args[i].type.types_compatible(fn.type.function_arg_types()[i]):
+                    # TODO: This will be wrong once optional args are in
+                    for i in range(0, passed_arg_count):
+                        # TODO: DO NOT USE TRY EXCEPT. Only here because shadows aren't in yet
+                        try:
+                            resolved_arg = self.expression(tree.children[1].children[i], fn.type.function_arg_types()[i])
+                        except:
                             matches = False
                             break
+
+                        if not resolved_arg.type.types_compatible(fn.type.function_arg_types()[i]):
+                            matches = False
+                            break
+                        params.append(resolved_arg)
                     if matches:
                         callee = NodeSymbol(fn, fn.type)
                         break
+                params = []
         else:
             callee = self.expression(tree.children[0], None)
         # TODO: allow non-symbol calls i.e. function pointers
         assert callee != None, f"No matching overload found for {tree.children[0].children[0].children[0]}"
         assert isinstance(callee, NodeSymbol), "can only call symbols"
 
-        params = []
         ret_type = None
         if callee.type.kind == TypeKind.type:
             ret_type = callee.type
         else:
-            arg_types = callee.symbol.type.function_arg_types()
             ret_type = callee.symbol.type.return_type()
             if ret_type == None:
                 ret_type = self.current_scope.lookup_type("unit", shallow=True)
-
-            params = []
-            if tree.children[1] != None:
-                # child 0 is None in empty calls i.e f()
-                if tree.children[1].children[0] is not None:
-                    assert len(tree.children[1].children) == len(arg_types)
-                    for i in range(0, len(arg_types)):
-                        params.append(self.expression(tree.children[1].children[i], arg_types[i]))
-            else:
-                assert len(arg_types) == 0
 
         return NodeFnCall(
             callee=callee,
