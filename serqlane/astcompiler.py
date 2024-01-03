@@ -36,7 +36,7 @@ class SerqInternalError(Exception): ...
 
 class Node:
     def __init__(self, type: Type) -> None:
-        assert type != None and isinstance(type, Type)
+        assert type != None and isinstance(type, Type), type
         self.type = type
 
     def render(self) -> str:
@@ -294,7 +294,7 @@ class NodeFnDefinition(Node):
         self.body = body
 
     def render(self) -> str:
-        return f"fn {self.sym.render()}({self.params.render()}) -> {self.sym.type.data[1].symbol.render()} {self.body.render()}"
+        return f"fn {self.sym.render()}({self.params.render()}) -> {self.sym.type.sym.render()} {self.body.render()}"
 
 class NodeFnCall(Node):
     def __init__(self, callee: Node, args: list[Node], type: Type) -> None:
@@ -316,6 +316,7 @@ class SymbolKind(Enum):
     field = auto()
 
 
+# TODO: Give every symbol a generation. Deferred function bodies should not be able to look up globals defined after themselves
 class Symbol:
     def __init__(self, id: str, name: str, type: Type = None, mutable: bool = False, magic=False) -> None:
         # TODO: Should store the source node, symbol kinds
@@ -620,6 +621,9 @@ class Scope:
         if sym != None:
             return sym.type
 
+    def inject(self, sym: Symbol):
+        self._local_syms.append(sym)
+
     def put(self, name: str, checked=True, shallow=False) -> Symbol:
         assert type(name) == str
         if checked and self.lookup(name, shallow=shallow): raise ValueError(f"redefinition of {name}")
@@ -628,7 +632,7 @@ class Scope:
             raise ValueError(f"Cannot use reserved keyword `{name}` as a symbol name")
 
         result = Symbol(self.module_graph.sym_id_gen.next(), name=name)
-        self._local_syms.append(result)
+        self.inject(result)
         return result
     
     def put_function(self, name: str, type: Type) -> Symbol:
@@ -683,8 +687,11 @@ class CompCtx:
         self.module = module
         self.graph = graph
         self.current_scope = self.module.global_scope
-        self.fn_ret_type_stack: list[Type] = []
         self.in_loop_counter = 0
+        
+        # deferred body mode
+        self.handling_deferred_fn_body = False
+        self.current_deferred_ret_type: Optional[Type] = None
 
     def open_scope(self):
         self.current_scope = self.current_scope.make_child()
@@ -692,13 +699,17 @@ class CompCtx:
     def close_scope(self):
         self.current_scope = self.current_scope.parent
 
+    def defer_fn_body(self, sym: Symbol, body: Tree):
+        self.module.deferred_fn_bodies.append((sym, body))
+
+
     def get_infer_type(self) -> Type:
         return Type(kind=TypeKind.infer, sym=None)
 
     def get_unit_type(self) -> Type:
         return self.current_scope.lookup_type("unit", shallow=True)
 
-    # new functions
+
     def statement(self, tree: Tree, expected_type: Type) -> Node:
         assert tree.data == "statement", tree.data
         assert len(tree.children) == 1, f"{len(tree.children)} --- {tree.children=}"
@@ -716,7 +727,7 @@ class CompCtx:
             case "let_stmt":
                 return self.let_stmt(child, expected_type)
             case "return_stmt":
-                return self.return_stmt(child, expected_type)
+                return self.return_stmt(child)
             case "assignment":
                 return self.assignment(child, expected_type)
             case "if_stmt":
@@ -791,6 +802,7 @@ class CompCtx:
 
         if expected_type != None:
             result.add(self.statement(last_child, expected_type))
+            # TODO: Get rid of check here once shadow syms are in
             assert expected_type.types_compatible(result.children[-1].type), f"Expected type {expected_type.sym.render()} for block but got {result.children[-1].type.sym.render()}"
             result.type = result.children[-1].type
         elif len(result.children) > 0:
@@ -1068,16 +1080,16 @@ class CompCtx:
             type=self.get_unit_type()
         )
 
-    def return_stmt(self, tree: Tree, expected_type: Type) -> NodeReturn:
+    def return_stmt(self, tree: Tree) -> NodeReturn:
         assert tree.data == "return_stmt", tree.data
-        assert len(self.fn_ret_type_stack) > 0, "Return outside of a function"
+        assert self.handling_deferred_fn_body, "Return outside of a function"
         # TODO: Make sure this passes type checks
         expr = None
         if tree.children[0] != None:
-            expr = self.expression(tree.children[0], self.fn_ret_type_stack[-1])
+            expr = self.expression(tree.children[0], self.current_deferred_ret_type)
         else:
-            expr = NodeEmpty(self.fn_ret_type_stack[-1])        
-        assert self.fn_ret_type_stack[-1].types_compatible(expr.type), f"Incompatible return({expr.type.sym.render()}) for function type({self.fn_ret_type_stack[-1].render()})"
+            expr = NodeEmpty(self.current_deferred_ret_type)
+        assert self.current_deferred_ret_type.types_compatible(expr.type), f"Incompatible return({expr.type.sym.render()}) for function type({self.current_deferred_ret_type.render()})"
         return NodeReturn(expr=expr, type=self.get_unit_type())
 
     def alias_definition(self, tree: Tree, expected_type: Type) -> NodeAliasDefinition:
@@ -1131,6 +1143,46 @@ class CompCtx:
         def_node = NodeStructDefinition(sym, fields, self.get_unit_type())
         sym.definition_node = def_node
         return def_node
+    
+    def handle_deferred_fn_body(self, tree: Tree, sym: Symbol) -> NodeBlockStmt:
+        print("BUILDING FUNCTION BODY")
+        self.current_deferred_ret_type = sym.type.return_type()
+
+        # isolate params again
+        self.open_scope()
+        d: NodeFnDefinition = None
+        for param in sym.definition_node.params.args:
+            self.current_scope.inject(param[0].symbol)
+
+        body = self.handle_block(tree, self.get_infer_type())
+
+        # TODO: Revisit this segment once symbol shadowing is in.
+        # All of this should be handled by a transformation sym
+        if len(body.children) > 0:
+            last_body_node = body.children[-1]
+            if last_body_node.type.kind == TypeKind.unit and not sym.type.return_type().kind == TypeKind.unit and not isinstance(last_body_node, NodeReturn):
+                assert False, f"Returning a unit type for expected type {sym.type.return_type().sym.render()} is not permitted"
+            elif isinstance(last_body_node, NodeReturn):
+                pass # return is already checked
+            elif last_body_node.type.kind in literal_types:
+                body = self.handle_block(tree.children[3], body)
+                last_body_node = body.children[-1]
+                if last_body_node.type.kind in builtin_userspace_types:
+                    assert last_body_node.type.types_compatible(sym.type.return_type()), f"Invalid return expression type {last_body_node.type.sym.render()} for return type {sym.type.return_type().sym.render()}"
+                body.children[-1] = NodeReturn(last_body_node, self.get_unit_type())
+            else:
+                assert last_body_node.type.types_compatible(sym.type.return_type()), f"Invalid return expression type {last_body_node.type.sym.render()} for return type {sym.type.return_type().sym.render()}"
+                if last_body_node.type.kind == TypeKind.unit:
+                    body.children.append(NodeReturn(NodeEmpty(self.get_unit_type()), self.get_unit_type()))
+                else:
+                    body.children[-1] = NodeReturn(last_body_node, self.get_unit_type())
+        else:
+            assert sym.type.return_type().kind == TypeKind.unit
+            body.children.append(NodeReturn(NodeEmpty(self.get_unit_type()), self.get_unit_type()))
+
+        self.close_scope()
+
+        return body
 
     def fn_definition_args(self, tree: Tree, expected_type: Type) -> NodeFnParameters:
         assert tree.data == "fn_definition_args", tree.data
@@ -1174,7 +1226,7 @@ class CompCtx:
         fn_type = Type(
             kind=TypeKind.function,
             sym=None,
-            data=([x[1].type for x in args_node.args], ret_type_node)
+            data=([x[1].type for x in args_node.args], ret_type)
         )
 
         # The sym must be created here to make recursive calls work without polluting the arg scope
@@ -1182,10 +1234,11 @@ class CompCtx:
         fn_type.sym = sym
 
         # TODO: Make this work for generics later
-        self.fn_ret_type_stack.append(ret_type)
+        self.defer_fn_body(sym, tree.children[3])
+        #body_node = self.handle_block(tree.children[3], self.get_infer_type())
 
-        body_node = self.handle_block(tree.children[3], self.get_infer_type())
-
+        # TODO: Handle this as part of deferred body
+        """
         # TODO: Simplify checks, we can rely on the fact that it has to be transformed into `return x`
         if len(body_node.children) > 0:
             last_body_node = body_node.children[-1]
@@ -1207,14 +1260,13 @@ class CompCtx:
                     body_node.children[-1] = NodeReturn(last_body_node, self.get_unit_type())
         else:
             body_node.children.append(NodeReturn(NodeEmpty(self.get_unit_type()), self.get_unit_type()))
-
-        self.fn_ret_type_stack.pop()
-
+        """
+            
         self.close_scope()
 
         sym.type = fn_type
 
-        res = NodeFnDefinition(sym, args_node, body_node, self.get_unit_type())
+        res = NodeFnDefinition(sym, args_node, None, self.get_unit_type())
         sym.definition_node = res
         return res
 
@@ -1258,13 +1310,9 @@ class CompCtx:
         if callee.type.kind == TypeKind.type:
             ret_type = callee.type
         else:
-            arg_types = callee.symbol.type.data[0]
-            ret_type_node = callee.symbol.type.data[1]
-            ret_type = None
-            if ret_type_node != None:
-                assert isinstance(ret_type_node, NodeSymbol), f"{ret_type_node=}"
-                ret_type = ret_type_node.type # TODO: Fix garbage type, should be a `type`, not evaluated type
-            else:
+            arg_types = callee.symbol.type.function_arg_types()
+            ret_type = callee.symbol.type.return_type()
+            if ret_type == None:
                 ret_type = self.current_scope.lookup_type("unit", shallow=True)
 
             params = []
@@ -1343,6 +1391,9 @@ class Module:
         # mapping of (name, dict[params]) -> Type
         self.generic_cache: dict[tuple[str, dict[Symbol, Type]], Type] = {}
 
+        # TODO: Generics should use the same deferred trick, but they should not be removed from the deferred list
+        self.deferred_fn_bodies: list[tuple[Symbol, Tree]] = []
+
     def lookup_toplevel(self, name: str) -> Optional[Symbol]:
         return self.global_scope.lookup(name, shallow=True)
 
@@ -1395,7 +1446,7 @@ class ModuleGraph:
         magic_type = Type(TypeKind.magic, magic_sym)
         magic_sym.type = magic_type
 
-        dbg_sym_type = Type(TypeKind.function, None, ([magic_type], NodeSymbol(unit_type_sym, unit_type_sym.type)))
+        dbg_sym_type = Type(TypeKind.function, None, ([magic_type], unit_type_sym.type))
         dbg_sym = self.builtin_scope.put_magic_function("dbg", dbg_sym_type)
         dbg_sym_type.sym = dbg_sym
 
@@ -1406,6 +1457,15 @@ class ModuleGraph:
         self._next_id += 1
         self.modules[name] = mod
         # TODO: Make sure the module isn't already being processed
-        ast: NodeStmtList = CompCtx(mod, self).start(mod.lark_tree, None)
+        ctx = CompCtx(mod, self)
+        ast: NodeStmtList = ctx.start(mod.lark_tree, None)
+
+        # TODO: Check type cohesion
+        ctx.handling_deferred_fn_body = True
+        for fn in mod.deferred_fn_bodies:
+            body = ctx.handle_deferred_fn_body(fn[1], fn[0])
+            fn[0].definition_node.body = body
+        ctx.handling_deferred_fn_body = False
+
         mod.ast = ast
         return mod
