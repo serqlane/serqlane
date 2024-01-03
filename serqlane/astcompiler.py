@@ -583,21 +583,23 @@ class Scope:
         self.parent: Scope = None
         self.module_graph = graph # TODO: Get rid of builtin hack
 
-    def iter_function_defs(self, name: str) -> Iterator[Symbol]:
+    def iter_syms(self, name: Optional[str] = None) -> Iterator[Symbol]:
         # prefer magics
         if self.module_graph.builtin_scope != self:
-            for sym in self.module_graph.builtin_scope.iter_function_defs(name):
-                if sym.name == name:
+            for sym in self.module_graph.builtin_scope.iter_syms(name):
+                if name == None or sym.name == name:
                     yield sym
 
         for sym in self._local_syms:
-            # TODO: Maybe split functions and types here? Also handle builtin types here, no reason they should be different
-            if sym.type.kind not in callable_types:
-                continue
-            if sym.name == name:
+            if name == None or sym.name == name:
                 yield sym
         if self.parent != None:
-            yield from self.parent.iter_function_defs(name)
+            yield from self.parent.iter_syms(name)
+
+    def iter_function_defs(self, name: Optional[str] = None) -> Iterator[Symbol]:
+        for sym in self.iter_syms(name):
+            if sym.type.kind in callable_types:
+                yield sym
 
     def _lookup_impl(self, name: str, shallow=False) -> Symbol:
         for symbol in self._local_syms:
