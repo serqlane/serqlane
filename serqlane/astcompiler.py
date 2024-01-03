@@ -1149,9 +1149,8 @@ class CompCtx:
     def handle_deferred_fn_body(self, tree: Tree, sym: Symbol) -> NodeBlockStmt:
         self.current_deferred_ret_type = sym.type.return_type()
 
-        # isolate params again
+        # isolate params and body
         self.open_scope()
-        d: NodeFnDefinition = None
         for param in sym.definition_node.params.args:
             self.current_scope.inject(param[0].symbol)
 
