@@ -725,6 +725,8 @@ class CompCtx:
                 return self.while_stmt(child, expected_type)
             case "break_stmt" | "continue_stmt":
                 return self.handle_break_or_continue(child, expected_type)
+            case "block_stmt": 
+                return self.handle_block(child, expected_type)
             case _:
                 raise SerqInternalError(f"Unimplemented statement type: {child.data}")
 
