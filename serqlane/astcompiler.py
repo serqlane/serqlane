@@ -594,35 +594,35 @@ class Scope:
             return self.older_sibling.get_oldest_sibling()
         return self
 
-    def iter_public(self) -> Iterator[Symbol]:
-        for sym in self._local_syms:
-            if sym.public:
-                yield sym
-
-    def iter_syms(self, name: Optional[str] = None, shallow=False, *, include_magics=True) -> Iterator[Symbol]:
+    def _iter_syms_impl(self, shallow=False, *, include_magics=True) -> Iterator[Symbol]:
         # prefer magics
         if self.module_graph.builtin_scope != self and include_magics:
-            for sym in self.module_graph.builtin_scope.iter_syms(name):
-                if name == None or sym.name == name:
-                    yield sym
+            for sym in self.module_graph.builtin_scope._iter_syms_impl():
+                yield sym
 
         # local lookup
         for sym in self._local_syms:
-            if name == None or sym.name == name:
-                yield sym
-        
+            yield sym
+
         # sibling lookup
         # done in place because we do not want to slip through to parent multiple times
         older = self.older_sibling
         while older != None:
             for sym in older._local_syms:
-                if name == None or sym.name == name:
-                    yield sym
+                yield sym
             older = older.older_sibling
-        
+
         # parent lookup
         if not shallow and self.parent != None:
-            yield from self.parent.iter_syms(name, include_magics=False)
+            yield from self.parent._iter_syms_impl(include_magics=False)
+
+    def iter_syms(self, name: Optional[str] = None, shallow=False, *, include_magics=True, only_public=False) -> Iterator[Symbol]:
+        for sym in self._iter_syms_impl(shallow=shallow, include_magics=include_magics):
+            if name != None and sym.name != name:
+                continue
+            if only_public and not sym.public:
+                continue
+            yield sym
 
     def iter_function_defs(self, name: Optional[str] = None) -> Iterator[Symbol]:
         for sym in self.iter_syms(name):
@@ -770,9 +770,14 @@ class CompCtx:
                 return self.handle_break_or_continue(child, expected_type)
             case "block_stmt": 
                 return self.handle_block(child, expected_type)
+            case "import_stmt":
+                return self.handle_import(child)
             case _:
                 raise SerqInternalError(f"Unimplemented statement type: {child.data}")
 
+
+    def handle_import(self, tree: Tree):
+        raise NotImplementedError()
 
     def handle_break_or_continue(self, tree: Tree, expected_type: Type) -> NodeBreak | NodeContinue:
         assert tree.data in ["break_stmt", "continue_stmt"], tree.data
@@ -1357,7 +1362,7 @@ class CompCtx:
         else:
             assert False
 
-    def start(self, tree: Tree, expected_type: Type) -> NodeStmtList:
+    def start(self, tree: Tree) -> NodeStmtList:
         assert tree.data == "start", tree.data
         result = NodeStmtList(self.current_scope.lookup_type("unit", shallow=True))
         for child in tree.children:
@@ -1450,7 +1455,7 @@ class ModuleGraph:
         self.modules[name] = mod
         # TODO: Make sure the module isn't already being processed
         ctx = CompCtx(mod, self)
-        ast: NodeStmtList = ctx.start(mod.lark_tree, None)
+        ast: NodeStmtList = ctx.start(mod.lark_tree)
 
         # TODO: Check type cohesion
         ctx.handling_deferred_fn_body = True
