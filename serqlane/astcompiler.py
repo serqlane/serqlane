@@ -580,20 +580,41 @@ class Type:
 class Scope:
     def __init__(self, graph: ModuleGraph) -> None:
         self._local_syms: list[Symbol] = []
-        self.parent: Scope = None
         self.module_graph = graph # TODO: Get rid of builtin hack
+        
+        # A scope only has access to the immediate syms of their older siblings and their parent which repeats that rule.
+        # This prevents out of order access during deferred body transformation.
+        # Note: Functions and structs are always added to the oldest sibling to enable mutual dependencies.
+        self.parent: Scope = None
+        self.older_sibling: Scope = None # Can actually be represented as a parent, but this is good enough for now
 
-    def iter_syms(self, name: Optional[str] = None) -> Iterator[Symbol]:
+    def get_oldest_sibling(self) -> Scope:
+        if self.older_sibling != None:
+            return self.older_sibling.get_oldest_sibling()
+        return self
+
+    def iter_syms(self, name: Optional[str] = None, shallow=False) -> Iterator[Symbol]:
         # prefer magics
         if self.module_graph.builtin_scope != self:
             for sym in self.module_graph.builtin_scope.iter_syms(name):
                 if name == None or sym.name == name:
                     yield sym
 
+        # local lookup
         for sym in self._local_syms:
             if name == None or sym.name == name:
                 yield sym
-        if self.parent != None:
+        
+        # sibling lookup
+        older = self.older_sibling
+        while older != None:
+            for sym in older._local_syms:
+                if name == None or sym.name == name:
+                    yield sym
+            older = older.older_sibling
+        
+        # parent lookup
+        if not shallow and self.parent != None:
             yield from self.parent.iter_syms(name)
 
     def iter_function_defs(self, name: Optional[str] = None) -> Iterator[Symbol]:
@@ -602,13 +623,9 @@ class Scope:
                 yield sym
 
     def _lookup_impl(self, name: str, shallow=False) -> Symbol:
-        for symbol in self._local_syms:
-            if symbol.name == name:
-                return symbol
-        if shallow or self.parent == None:
-            # TODO: Report error in module
-            return None
-        return self.parent._lookup_impl(name)
+        for sym in self.iter_syms(name, shallow=shallow):
+            return sym
+        return None
 
     def lookup(self, name: str, shallow=False) -> Optional[Symbol]:
         # Must be unambiguous, can return an unexported symbol. Checked at calltime
@@ -678,6 +695,12 @@ class Scope:
     def make_child(self) -> Scope:
         res = Scope(self.module_graph)
         res.parent = self
+        return res
+
+    def make_sibling(self) -> Scope:
+        res = Scope(self.module_graph)
+        res.parent = self.parent
+        res.older_sibling = self
         return res
 
     def merge(self, other: Scope):
