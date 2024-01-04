@@ -1454,7 +1454,8 @@ class ModuleGraph:
         ctx.handling_deferred_fn_body = True
         old_scope = ctx.current_scope
 
-        for fn in mod.deferred_fn_bodies:
+        while len(mod.deferred_fn_bodies) > 0:
+            fn = mod.deferred_fn_bodies.pop()
             ctx.current_scope = fn[2]
             body = ctx.handle_deferred_fn_body(fn[1], fn[0])
             fn[0].definition_node.body = body
