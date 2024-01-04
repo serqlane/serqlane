@@ -294,7 +294,8 @@ class NodeFnDefinition(Node):
         self.body = body
 
     def render(self) -> str:
-        return f"fn {self.sym.render()}({self.params.render()}) -> {self.sym.type.return_type().sym.render()} {self.body.render()}"
+        pub_str = "pub " if self.sym.public else ""
+        return f"{pub_str}fn {self.sym.render()}({self.params.render()}) -> {self.sym.type.return_type().sym.render()} {self.body.render()}"
 
 class NodeFnCall(Node):
     def __init__(self, callee: Node, args: list[Node], type: Type) -> None:
@@ -323,7 +324,7 @@ class Symbol:
         self.id = id
         self.name = name
         self.type = type
-        self.exported = False
+        self.public = False
         self.mutable = mutable
         self.definition_node: Node = None
         self.magic = magic
@@ -592,6 +593,11 @@ class Scope:
         if self.older_sibling != None:
             return self.older_sibling.get_oldest_sibling()
         return self
+
+    def iter_public(self) -> Iterator[Symbol]:
+        for sym in self._local_syms:
+            if sym.public:
+                yield sym
 
     def iter_syms(self, name: Optional[str] = None, shallow=False, *, include_magics=True) -> Iterator[Symbol]:
         # prefer magics
@@ -1225,18 +1231,20 @@ class CompCtx:
         assert tree.data == "fn_definition", tree.data
         assert expected_type.kind == TypeKind.unit
 
-        ident_node = tree.children[0]
+        public = tree.children[0] != None
+
+        ident_node = tree.children[1]
         assert ident_node.data == "identifier"
         ident = ident_node.children[0].value
 
         # must open a scope here to isolate the params
         self.open_scope()
         
-        args_node = self.fn_definition_args(tree.children[1], self.get_unit_type())
+        args_node = self.fn_definition_args(tree.children[2], self.get_unit_type())
         ret_type_node = NodeSymbol(self.get_unit_type().sym, self.get_unit_type())
         ret_type = ret_type_node.type
-        if tree.children[2] != None:
-            ret_type_node = self.user_type(tree.children[2], None)
+        if tree.children[3] != None:
+            ret_type_node = self.user_type(tree.children[3], None)
             ret_type = ret_type_node.type # TODO: Fix this nonsense, type should be `type`, not whatever the type evaluates to
 
         # TODO: Use a type cache to load function with the same type from it for easier matching
@@ -1248,10 +1256,11 @@ class CompCtx:
 
         # The sym must be created here to make recursive calls work without polluting the arg scope
         sym = self.current_scope.parent.get_oldest_sibling().put_function(ident, fn_type)
+        sym.public = public
         fn_type.sym = sym
 
         # TODO: Make this work for generics later
-        self.defer_fn_body(sym, tree.children[3])
+        self.defer_fn_body(sym, tree.children[4])
 
         # Order is important here. We want the sibling to be part of the body's parent to isolate the insides and create a one-way boundary
         self.close_scope()
@@ -1354,6 +1363,8 @@ class CompCtx:
         for child in tree.children:
             node = self.statement(child, self.get_unit_type())
             result.add(node)
+        if self.current_scope.parent != None:
+            raise SerqInternalError("Ended on a scope that isn't top level")
         return result
 
 
