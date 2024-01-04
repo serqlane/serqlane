@@ -136,3 +136,55 @@ dbg(abc(1))
 @pytest.mark.parametrize("code,expected", overload_tests)
 def test_overloads(capture_first_debug, code, expected):
     assert capture_first_debug(code) == expected
+
+
+# code, expected
+forward_calls_tests_passing = [
+("""
+fn a() {
+ b()
+}
+ 
+fn b() {
+ dbg(1)
+}
+
+a()
+""", 1), (
+"""
+fn foo() -> int32 {
+    bar(10)
+}
+
+fn bar(a: int32) -> int32 {
+    a
+}
+
+dbg(foo())
+""", 10
+)
+]
+
+
+# code
+forward_calls_tests_failing = [
+"""
+fn a() {}
+
+b()
+
+fn b() {}
+"""
+] 
+
+
+@pytest.mark.parametrize("code,expected", forward_calls_tests_passing)
+def test_forward_calls(capture_first_debug, code, expected):
+    assert capture_first_debug(code) == expected
+
+
+@pytest.mark.parametrize("code", forward_calls_tests_failing)
+def test_forward_calls_failing(executor, code):
+    with pytest.raises(AssertionError):
+        executor(code)
+

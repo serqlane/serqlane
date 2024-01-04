@@ -36,7 +36,7 @@ class SerqInternalError(Exception): ...
 
 class Node:
     def __init__(self, type: Type) -> None:
-        assert type != None and isinstance(type, Type)
+        assert type != None and isinstance(type, Type), type
         self.type = type
 
     def render(self) -> str:
@@ -294,7 +294,7 @@ class NodeFnDefinition(Node):
         self.body = body
 
     def render(self) -> str:
-        return f"fn {self.sym.render()}({self.params.render()}) -> {self.sym.type.data[1].symbol.render()} {self.body.render()}"
+        return f"fn {self.sym.render()}({self.params.render()}) -> {self.sym.type.return_type().sym.render()} {self.body.render()}"
 
 class NodeFnCall(Node):
     def __init__(self, callee: Node, args: list[Node], type: Type) -> None:
@@ -316,6 +316,7 @@ class SymbolKind(Enum):
     field = auto()
 
 
+# TODO: Give every symbol a generation. Deferred function bodies should not be able to look up globals defined after themselves
 class Symbol:
     def __init__(self, id: str, name: str, type: Type = None, mutable: bool = False, magic=False) -> None:
         # TODO: Should store the source node, symbol kinds
@@ -579,33 +580,53 @@ class Type:
 class Scope:
     def __init__(self, graph: ModuleGraph) -> None:
         self._local_syms: list[Symbol] = []
-        self.parent: Scope = None
         self.module_graph = graph # TODO: Get rid of builtin hack
+        
+        # A scope only has access to the immediate syms of their older siblings and their parent which repeats that rule.
+        # This prevents out of order access during deferred body transformation.
+        # Note: Functions and structs are always added to the oldest sibling to enable mutual dependencies.
+        self.parent: Scope = None
+        self.older_sibling: Scope = None # Can actually be represented as a parent, but this is good enough for now
 
-    def iter_function_defs(self, name: str) -> Iterator[Symbol]:
+    def get_oldest_sibling(self) -> Scope:
+        if self.older_sibling != None:
+            return self.older_sibling.get_oldest_sibling()
+        return self
+
+    def iter_syms(self, name: Optional[str] = None, shallow=False, *, include_magics=True) -> Iterator[Symbol]:
         # prefer magics
-        if self.module_graph.builtin_scope != self:
-            for sym in self.module_graph.builtin_scope.iter_function_defs(name):
-                if sym.name == name:
+        if self.module_graph.builtin_scope != self and include_magics:
+            for sym in self.module_graph.builtin_scope.iter_syms(name):
+                if name == None or sym.name == name:
                     yield sym
 
+        # local lookup
         for sym in self._local_syms:
-            # TODO: Maybe split functions and types here? Also handle builtin types here, no reason they should be different
-            if sym.type.kind not in callable_types:
-                continue
-            if sym.name == name:
+            if name == None or sym.name == name:
                 yield sym
-        if self.parent != None:
-            yield from self.parent.iter_function_defs(name)
+        
+        # sibling lookup
+        # done in place because we do not want to slip through to parent multiple times
+        older = self.older_sibling
+        while older != None:
+            for sym in older._local_syms:
+                if name == None or sym.name == name:
+                    yield sym
+            older = older.older_sibling
+        
+        # parent lookup
+        if not shallow and self.parent != None:
+            yield from self.parent.iter_syms(name, include_magics=False)
+
+    def iter_function_defs(self, name: Optional[str] = None) -> Iterator[Symbol]:
+        for sym in self.iter_syms(name):
+            if sym.type.kind in callable_types:
+                yield sym
 
     def _lookup_impl(self, name: str, shallow=False) -> Symbol:
-        for symbol in self._local_syms:
-            if symbol.name == name:
-                return symbol
-        if shallow or self.parent == None:
-            # TODO: Report error in module
-            return None
-        return self.parent._lookup_impl(name)
+        for sym in self.iter_syms(name, shallow=shallow):
+            return sym
+        return None
 
     def lookup(self, name: str, shallow=False) -> Optional[Symbol]:
         # Must be unambiguous, can return an unexported symbol. Checked at calltime
@@ -674,6 +695,12 @@ class Scope:
         res.parent = self
         return res
 
+    def make_sibling(self) -> Scope:
+        res = Scope(self.module_graph)
+        res.parent = self.parent
+        res.older_sibling = self
+        return res
+
     def merge(self, other: Scope):
         ...
 
@@ -683,8 +710,11 @@ class CompCtx:
         self.module = module
         self.graph = graph
         self.current_scope = self.module.global_scope
-        self.fn_ret_type_stack: list[Type] = []
         self.in_loop_counter = 0
+        
+        # deferred body mode
+        self.handling_deferred_fn_body = False
+        self.current_deferred_ret_type: Optional[Type] = None
 
     def open_scope(self):
         self.current_scope = self.current_scope.make_child()
@@ -692,13 +722,20 @@ class CompCtx:
     def close_scope(self):
         self.current_scope = self.current_scope.parent
 
+    def enter_sibling_scope(self):
+        self.current_scope = self.current_scope.make_sibling()
+
+    def defer_fn_body(self, sym: Symbol, body: Tree):
+        self.module.deferred_fn_bodies.append((sym, body, self.current_scope))
+
+
     def get_infer_type(self) -> Type:
         return Type(kind=TypeKind.infer, sym=None)
 
     def get_unit_type(self) -> Type:
         return self.current_scope.lookup_type("unit", shallow=True)
 
-    # new functions
+
     def statement(self, tree: Tree, expected_type: Type) -> Node:
         assert tree.data == "statement", tree.data
         assert len(tree.children) == 1, f"{len(tree.children)} --- {tree.children=}"
@@ -716,7 +753,7 @@ class CompCtx:
             case "let_stmt":
                 return self.let_stmt(child, expected_type)
             case "return_stmt":
-                return self.return_stmt(child, expected_type)
+                return self.return_stmt(child)
             case "assignment":
                 return self.assignment(child, expected_type)
             case "if_stmt":
@@ -791,6 +828,7 @@ class CompCtx:
 
         if expected_type != None:
             result.add(self.statement(last_child, expected_type))
+            # TODO: Get rid of check here once shadow syms are in
             assert expected_type.types_compatible(result.children[-1].type), f"Expected type {expected_type.sym.render()} for block but got {result.children[-1].type.sym.render()}"
             result.type = result.children[-1].type
         elif len(result.children) > 0:
@@ -1068,16 +1106,16 @@ class CompCtx:
             type=self.get_unit_type()
         )
 
-    def return_stmt(self, tree: Tree, expected_type: Type) -> NodeReturn:
+    def return_stmt(self, tree: Tree) -> NodeReturn:
         assert tree.data == "return_stmt", tree.data
-        assert len(self.fn_ret_type_stack) > 0, "Return outside of a function"
+        assert self.handling_deferred_fn_body, "Return outside of a function"
         # TODO: Make sure this passes type checks
         expr = None
         if tree.children[0] != None:
-            expr = self.expression(tree.children[0], self.fn_ret_type_stack[-1])
+            expr = self.expression(tree.children[0], self.current_deferred_ret_type)
         else:
-            expr = NodeEmpty(self.fn_ret_type_stack[-1])        
-        assert self.fn_ret_type_stack[-1].types_compatible(expr.type), f"Incompatible return({expr.type.sym.render()}) for function type({self.fn_ret_type_stack[-1].render()})"
+            expr = NodeEmpty(self.current_deferred_ret_type)
+        assert self.current_deferred_ret_type.types_compatible(expr.type), f"Incompatible return({expr.type.sym.render()}) for function type({self.current_deferred_ret_type.render()})"
         return NodeReturn(expr=expr, type=self.get_unit_type())
 
     def alias_definition(self, tree: Tree, expected_type: Type) -> NodeAliasDefinition:
@@ -1131,6 +1169,37 @@ class CompCtx:
         def_node = NodeStructDefinition(sym, fields, self.get_unit_type())
         sym.definition_node = def_node
         return def_node
+    
+    def handle_deferred_fn_body(self, tree: Tree, sym: Symbol) -> NodeBlockStmt:
+        self.current_deferred_ret_type = sym.type.return_type()
+
+        body = self.handle_block(tree, self.get_infer_type())
+
+        # TODO: Revisit this segment once symbol shadowing is in.
+        # All of this should be handled by a transformation sym
+        if len(body.children) > 0:
+            last_body_node = body.children[-1]
+            if last_body_node.type.kind == TypeKind.unit and not sym.type.return_type().kind == TypeKind.unit and not isinstance(last_body_node, NodeReturn):
+                assert False, f"Returning a unit type for expected type {sym.type.return_type().sym.render()} is not permitted"
+            elif isinstance(last_body_node, NodeReturn):
+                pass # return is already checked
+            elif last_body_node.type.kind in literal_types:
+                body = self.handle_block(tree.children[3], body)
+                last_body_node = body.children[-1]
+                if last_body_node.type.kind in builtin_userspace_types:
+                    assert last_body_node.type.types_compatible(sym.type.return_type()), f"Invalid return expression type {last_body_node.type.sym.render()} for return type {sym.type.return_type().sym.render()}"
+                body.children[-1] = NodeReturn(last_body_node, self.get_unit_type())
+            else:
+                assert last_body_node.type.types_compatible(sym.type.return_type()), f"Invalid return expression type {last_body_node.type.sym.render()} for return type {sym.type.return_type().sym.render()}"
+                if last_body_node.type.kind == TypeKind.unit:
+                    body.children.append(NodeReturn(NodeEmpty(self.get_unit_type()), self.get_unit_type()))
+                else:
+                    body.children[-1] = NodeReturn(last_body_node, self.get_unit_type())
+        else:
+            assert sym.type.return_type().kind == TypeKind.unit
+            body.children.append(NodeReturn(NodeEmpty(self.get_unit_type()), self.get_unit_type()))
+
+        return body
 
     def fn_definition_args(self, tree: Tree, expected_type: Type) -> NodeFnParameters:
         assert tree.data == "fn_definition_args", tree.data
@@ -1174,108 +1243,68 @@ class CompCtx:
         fn_type = Type(
             kind=TypeKind.function,
             sym=None,
-            data=([x[1].type for x in args_node.args], ret_type_node)
+            data=([x[1].type for x in args_node.args], ret_type)
         )
 
         # The sym must be created here to make recursive calls work without polluting the arg scope
-        sym = self.current_scope.parent.put_function(ident, fn_type)
+        sym = self.current_scope.parent.get_oldest_sibling().put_function(ident, fn_type)
         fn_type.sym = sym
 
         # TODO: Make this work for generics later
-        self.fn_ret_type_stack.append(ret_type)
+        self.defer_fn_body(sym, tree.children[3])
 
-        body_node = self.handle_block(tree.children[3], self.get_infer_type())
-
-        # TODO: Simplify checks, we can rely on the fact that it has to be transformed into `return x`
-        if len(body_node.children) > 0:
-            last_body_node = body_node.children[-1]
-            if last_body_node.type.kind == TypeKind.unit and not expected_type.kind == TypeKind.unit and not isinstance(last_body_node, NodeReturn):
-                assert False, f"Returning a unit type for expected type {ret_type.sym.render()} is not permitted"
-            elif isinstance(last_body_node, NodeReturn):
-                pass # return is already checked
-            elif last_body_node.type.kind in literal_types:
-                body_node = self.handle_block(tree.children[3], ret_type)
-                last_body_node = body_node.children[-1]
-                if last_body_node.type.kind in builtin_userspace_types:
-                    assert last_body_node.type.types_compatible(ret_type), f"Invalid return expression type {last_body_node.type.sym.render()} for return type {ret_type.sym.render()}"
-                body_node.children[-1] = NodeReturn(last_body_node, self.get_unit_type())
-            else:
-                assert last_body_node.type.types_compatible(ret_type), f"Invalid return expression type {last_body_node.type.sym.render()} for return type {ret_type.sym.render()}"
-                if last_body_node.type.kind == TypeKind.unit:
-                    body_node.children.append(NodeReturn(NodeEmpty(self.get_unit_type()), self.get_unit_type()))
-                else:
-                    body_node.children[-1] = NodeReturn(last_body_node, self.get_unit_type())
-        else:
-            body_node.children.append(NodeReturn(NodeEmpty(self.get_unit_type()), self.get_unit_type()))
-
-        self.fn_ret_type_stack.pop()
-
+        # Order is important here. We want the sibling to be part of the body's parent to isolate the insides and create a one-way boundary
         self.close_scope()
+        self.enter_sibling_scope()
 
         sym.type = fn_type
 
-        res = NodeFnDefinition(sym, args_node, body_node, self.get_unit_type())
+        res = NodeFnDefinition(sym, args_node, None, self.get_unit_type())
         sym.definition_node = res
         return res
 
     def fn_call_expr(self, tree: Tree, expected_type: Type) -> NodeFnCall:
         assert tree.data == "fn_call_expr", tree.data
         # TODO: Once overloads/methods are in, this must scan visible symbols and retrieve a list. Handled in identifier though
-        unresolved_args: list[Node] = []
-        if tree.children[1] != None:
-            # child 0 is None in empty calls i.e f()
-            if tree.children[1].children[0] is not None:
-                for i in range(0, len(tree.children[1].children)):
-                    unresolved_args.append(self.expression(tree.children[1].children[i], self.get_infer_type()))
+        passed_arg_count = len(tree.children[1].children) if tree.children[1].children[0] != None else 0
 
         callee = None
+        params = []
         if len(tree.children[0].children) > 0 and tree.children[0].children[0].data == "identifier":
             # TODO: Better handling, use a candidate node instead
             for fn in self.current_scope.iter_function_defs(tree.children[0].children[0].children[0].value):
                 if fn.type.kind == TypeKind.type:
-                    assert len(unresolved_args) == 0, "Calling a struct with arguments is not yet supported" # TODO 
+                    assert passed_arg_count == 0, "Calling a struct with arguments is not yet supported" # TODO 
                     callee = NodeSymbol(fn, fn.type)
                     break
                 else:
-                    if len(unresolved_args) != len(fn.type.function_arg_types()):
+                    if passed_arg_count != len(fn.type.function_arg_types()):
                         continue
                     matches = True
-                    for i in range(0, len(unresolved_args)):
-                        if not unresolved_args[i].type.types_compatible(fn.type.function_arg_types()[i]):
+                    # TODO: This will be wrong once optional args are in
+                    for i in range(0, passed_arg_count):
+                        resolved_arg = self.expression(tree.children[1].children[i], fn.type.function_arg_types()[i])
+                        if not resolved_arg.type.types_compatible(fn.type.function_arg_types()[i]):
                             matches = False
                             break
+                        params.append(resolved_arg)
                     if matches:
                         callee = NodeSymbol(fn, fn.type)
                         break
+                params = []
         else:
             callee = self.expression(tree.children[0], None)
         # TODO: allow non-symbol calls i.e. function pointers
         assert callee != None, f"No matching overload found for {tree.children[0].children[0].children[0]}"
         assert isinstance(callee, NodeSymbol), "can only call symbols"
 
-        params = []
         ret_type = None
         if callee.type.kind == TypeKind.type:
             ret_type = callee.type
         else:
-            arg_types = callee.symbol.type.data[0]
-            ret_type_node = callee.symbol.type.data[1]
-            ret_type = None
-            if ret_type_node != None:
-                assert isinstance(ret_type_node, NodeSymbol), f"{ret_type_node=}"
-                ret_type = ret_type_node.type # TODO: Fix garbage type, should be a `type`, not evaluated type
-            else:
+            ret_type = callee.symbol.type.return_type()
+            if ret_type == None:
                 ret_type = self.current_scope.lookup_type("unit", shallow=True)
-
-            params = []
-            if tree.children[1] != None:
-                # child 0 is None in empty calls i.e f()
-                if tree.children[1].children[0] is not None:
-                    assert len(tree.children[1].children) == len(arg_types)
-                    for i in range(0, len(arg_types)):
-                        params.append(self.expression(tree.children[1].children[i], arg_types[i]))
-            else:
-                assert len(arg_types) == 0
 
         return NodeFnCall(
             callee=callee,
@@ -1343,6 +1372,9 @@ class Module:
         # mapping of (name, dict[params]) -> Type
         self.generic_cache: dict[tuple[str, dict[Symbol, Type]], Type] = {}
 
+        # TODO: Generics should use the same deferred trick, but they should not be removed from the deferred list
+        self.deferred_fn_bodies: list[tuple[Symbol, Tree, Scope]] = []
+
     def lookup_toplevel(self, name: str) -> Optional[Symbol]:
         return self.global_scope.lookup(name, shallow=True)
 
@@ -1395,7 +1427,7 @@ class ModuleGraph:
         magic_type = Type(TypeKind.magic, magic_sym)
         magic_sym.type = magic_type
 
-        dbg_sym_type = Type(TypeKind.function, None, ([magic_type], NodeSymbol(unit_type_sym, unit_type_sym.type)))
+        dbg_sym_type = Type(TypeKind.function, None, ([magic_type], unit_type_sym.type))
         dbg_sym = self.builtin_scope.put_magic_function("dbg", dbg_sym_type)
         dbg_sym_type.sym = dbg_sym
 
@@ -1406,6 +1438,21 @@ class ModuleGraph:
         self._next_id += 1
         self.modules[name] = mod
         # TODO: Make sure the module isn't already being processed
-        ast: NodeStmtList = CompCtx(mod, self).start(mod.lark_tree, None)
+        ctx = CompCtx(mod, self)
+        ast: NodeStmtList = ctx.start(mod.lark_tree, None)
+
+        # TODO: Check type cohesion
+        ctx.handling_deferred_fn_body = True
+        old_scope = ctx.current_scope
+
+        while len(mod.deferred_fn_bodies) > 0:
+            fn = mod.deferred_fn_bodies.pop()
+            ctx.current_scope = fn[2]
+            body = ctx.handle_deferred_fn_body(fn[1], fn[0])
+            fn[0].definition_node.body = body
+        
+        ctx.current_scope = old_scope
+        ctx.handling_deferred_fn_body = False
+
         mod.ast = ast
         return mod
