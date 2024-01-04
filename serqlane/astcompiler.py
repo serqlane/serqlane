@@ -294,7 +294,7 @@ class NodeFnDefinition(Node):
         self.body = body
 
     def render(self) -> str:
-        return f"fn {self.sym.render()}({self.params.render()}) -> {self.sym.type.sym.render()} {self.body.render()}"
+        return f"fn {self.sym.render()}({self.params.render()}) -> {self.sym.type.return_type().sym.render()} {self.body.render()}"
 
 class NodeFnCall(Node):
     def __init__(self, callee: Node, args: list[Node], type: Type) -> None:
