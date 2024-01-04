@@ -593,9 +593,9 @@ class Scope:
             return self.older_sibling.get_oldest_sibling()
         return self
 
-    def iter_syms(self, name: Optional[str] = None, shallow=False) -> Iterator[Symbol]:
+    def iter_syms(self, name: Optional[str] = None, shallow=False, *, include_magics=True) -> Iterator[Symbol]:
         # prefer magics
-        if self.module_graph.builtin_scope != self:
+        if self.module_graph.builtin_scope != self and include_magics:
             for sym in self.module_graph.builtin_scope.iter_syms(name):
                 if name == None or sym.name == name:
                     yield sym
@@ -606,6 +606,7 @@ class Scope:
                 yield sym
         
         # sibling lookup
+        # done in place because we do not want to slip through to parent multiple times
         older = self.older_sibling
         while older != None:
             for sym in older._local_syms:
@@ -615,7 +616,7 @@ class Scope:
         
         # parent lookup
         if not shallow and self.parent != None:
-            yield from self.parent.iter_syms(name)
+            yield from self.parent.iter_syms(name, include_magics=False)
 
     def iter_function_defs(self, name: Optional[str] = None) -> Iterator[Symbol]:
         for sym in self.iter_syms(name):
@@ -724,8 +725,11 @@ class CompCtx:
     def close_scope(self):
         self.current_scope = self.current_scope.parent
 
+    def enter_sibling_scope(self):
+        self.current_scope = self.current_scope.make_sibling()
+
     def defer_fn_body(self, sym: Symbol, body: Tree):
-        self.module.deferred_fn_bodies.append((sym, body))
+        self.module.deferred_fn_bodies.append((sym, body, self.current_scope))
 
 
     def get_infer_type(self) -> Type:
@@ -1255,11 +1259,12 @@ class CompCtx:
         self.close_scope()
 
         # The sym must be created here to make recursive calls work without polluting the arg scope
-        sym = self.current_scope.put_function(ident, fn_type)
+        sym = self.current_scope.get_oldest_sibling().put_function(ident, fn_type)
         fn_type.sym = sym
 
         # TODO: Make this work for generics later
         self.defer_fn_body(sym, tree.children[3])
+        self.enter_sibling_scope()
 
         sym.type = fn_type
 
@@ -1287,13 +1292,7 @@ class CompCtx:
                     matches = True
                     # TODO: This will be wrong once optional args are in
                     for i in range(0, passed_arg_count):
-                        # TODO: DO NOT USE TRY EXCEPT. Only here because shadows aren't in yet
-                        try:
-                            resolved_arg = self.expression(tree.children[1].children[i], fn.type.function_arg_types()[i])
-                        except:
-                            matches = False
-                            break
-
+                        resolved_arg = self.expression(tree.children[1].children[i], fn.type.function_arg_types()[i])
                         if not resolved_arg.type.types_compatible(fn.type.function_arg_types()[i]):
                             matches = False
                             break
@@ -1383,7 +1382,7 @@ class Module:
         self.generic_cache: dict[tuple[str, dict[Symbol, Type]], Type] = {}
 
         # TODO: Generics should use the same deferred trick, but they should not be removed from the deferred list
-        self.deferred_fn_bodies: list[tuple[Symbol, Tree]] = []
+        self.deferred_fn_bodies: list[tuple[Symbol, Tree, Scope]] = []
 
     def lookup_toplevel(self, name: str) -> Optional[Symbol]:
         return self.global_scope.lookup(name, shallow=True)
@@ -1453,9 +1452,14 @@ class ModuleGraph:
 
         # TODO: Check type cohesion
         ctx.handling_deferred_fn_body = True
+        old_scope = ctx.current_scope
+
         for fn in mod.deferred_fn_bodies:
+            ctx.current_scope = fn[2]
             body = ctx.handle_deferred_fn_body(fn[1], fn[0])
             fn[0].definition_node.body = body
+        
+        ctx.current_scope = old_scope
         ctx.handling_deferred_fn_body = False
 
         mod.ast = ast
