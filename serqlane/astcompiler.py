@@ -641,9 +641,6 @@ class Scope:
         if sym != None:
             return sym.type
 
-    def inject(self, sym: Symbol):
-        self._local_syms.append(sym)
-
     def put(self, name: str, checked=True, shallow=False) -> Symbol:
         assert type(name) == str
         if checked and self.lookup(name, shallow=shallow): raise ValueError(f"redefinition of {name}")
@@ -652,7 +649,7 @@ class Scope:
             raise ValueError(f"Cannot use reserved keyword `{name}` as a symbol name")
 
         result = Symbol(self.module_graph.sym_id_gen.next(), name=name)
-        self.inject(result)
+        self._local_syms.append(result)
         return result
     
     def put_function(self, name: str, type: Type) -> Symbol:
@@ -1176,11 +1173,6 @@ class CompCtx:
     def handle_deferred_fn_body(self, tree: Tree, sym: Symbol) -> NodeBlockStmt:
         self.current_deferred_ret_type = sym.type.return_type()
 
-        # isolate params and body
-        self.open_scope()
-        for param in sym.definition_node.params.args:
-            self.current_scope.inject(param[0].symbol)
-
         body = self.handle_block(tree, self.get_infer_type())
 
         # TODO: Revisit this segment once symbol shadowing is in.
@@ -1206,8 +1198,6 @@ class CompCtx:
         else:
             assert sym.type.return_type().kind == TypeKind.unit
             body.children.append(NodeReturn(NodeEmpty(self.get_unit_type()), self.get_unit_type()))
-
-        self.close_scope()
 
         return body
 
@@ -1256,14 +1246,15 @@ class CompCtx:
             data=([x[1].type for x in args_node.args], ret_type)
         )
 
-        self.close_scope()
-
         # The sym must be created here to make recursive calls work without polluting the arg scope
-        sym = self.current_scope.get_oldest_sibling().put_function(ident, fn_type)
+        sym = self.current_scope.parent.get_oldest_sibling().put_function(ident, fn_type)
         fn_type.sym = sym
 
         # TODO: Make this work for generics later
         self.defer_fn_body(sym, tree.children[3])
+
+        # Order is important here. We want the sibling to be part of the body's parent to isolate the insides and create a one-way boundary
+        self.close_scope()
         self.enter_sibling_scope()
 
         sym.type = fn_type
