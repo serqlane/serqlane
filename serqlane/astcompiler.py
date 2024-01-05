@@ -33,6 +33,7 @@ RESERVED_KEYWORDS = [
 
 
 class SerqInternalError(Exception): ...
+class SerqTypeInferError(Exception): ... # TODO: Get rid of this
 
 
 class Node:
@@ -59,6 +60,24 @@ class NodeSymbol(Node):
     def render(self) -> str:
         # TODO: Unique global identifier later
         return f"{self.symbol.render()}"
+
+class NodeOptions(Node):
+    def __init__(self, type: Type) -> None:
+        super().__init__(type)
+        self.options: list[Node] = []
+    
+    def extract_unambiguous(self) -> Node:
+        if len(self.options) != 1:
+            raise ValueError(f"Failed to extract an unambiguous node: {[x.render() for x in self.options]}")
+        return self.use_first()
+    
+    def use_first(self) -> Node:
+        assert len(self.options) > 0
+        return self.options[0]
+
+    def render(self) -> str:
+        # Just use the first sym, if this appears in the final ast that's a bug
+        return f"{self.options[0].render()}"
 
 class NodeStmtList(Node):
     def __init__(self, type: Type) -> None:
@@ -858,7 +877,10 @@ class CompCtx:
             result.add(self.statement(child, self.get_unit_type()))
 
         if expected_type != None:
-            result.add(self.statement(last_child, expected_type))
+            last = self.statement(last_child, expected_type)
+            if isinstance(last, NodeOptions):
+                last = last.extract_unambiguous()
+            result.add(last)
             # TODO: Get rid of check here once shadow syms are in
             assert expected_type.types_compatible(result.children[-1].type), f"Expected type {expected_type.sym.render()} for block but got {result.children[-1].type.sym.render()}"
             result.type = result.children[-1].type
@@ -895,7 +917,8 @@ class CompCtx:
             if expected_type.kind in free_infer_types:
                 expected_type = self.current_scope.lookup_type(lookup_name, shallow=True)
             else:
-                assert expected_type.types_compatible(Type(literal_kind, sym=None))
+                if not expected_type.types_compatible(Type(literal_kind, sym=None)):
+                    raise SerqTypeInferError()
             return node_type(value=value, type=expected_type)
         else:
             return node_type(value=value, type=Type(literal_kind, sym=None))
@@ -924,18 +947,22 @@ class CompCtx:
     def binary_expression(self, tree: Tree, expected_type: Type) -> NodeBinaryExpr:
         assert tree.data == "binary_expression", tree.data
         lhs = self.expression(tree.children[0], None)
+        if isinstance(lhs, NodeOptions):
+            lhs = lhs.extract_unambiguous()
         # TODO: Can the symbol be captured somehow?
         op = tree.children[1].data.value
         # a dot expression does not work by the same type rules
         if op != "dot":
             rhs = self.expression(tree.children[2], None)
+            if isinstance(rhs, NodeOptions):
+                rhs = rhs.extract_unambiguous()
 
             # TODO: Dot expr
             if not lhs.type.types_compatible(rhs.type):
                 # TODO: Error reporting
                 tl = lhs.type.instantiate_literal(self.graph) if lhs.type.kind in literal_types else lhs.type
                 tr = rhs.type.instantiate_literal(self.graph) if rhs.type.kind in literal_types else rhs.type
-                raise ValueError(f"Incompatible values in binary expression: `{lhs.render()}`:{lhs.render()} {op} `{tl.sym.render()}`:{tr.sym.render()}")
+                raise ValueError(f"Incompatible values in binary expression: `{lhs.render()}`:{tl.render()} {op} `{rhs.render()}`:{tr.render()}")
             
             # Type coercion. Revisits "broken" nodes and tries to apply the new info on them 
             # TODO: Parts of this should probably be pulled into a new function
@@ -944,22 +971,34 @@ class CompCtx:
             # if there is a known type, spread it around
             if lhs.type.kind in literal_types and rhs.type.kind not in literal_types:
                 lhs = self.expression(tree.children[0], rhs.type)
+                if isinstance(lhs, NodeOptions):
+                    lhs = lhs.extract_unambiguous()
             elif rhs.type.kind in literal_types and lhs.type.kind not in literal_types:
                 rhs = self.expression(tree.children[2], lhs.type)
-            
+                if isinstance(rhs, NodeOptions):
+                    rhs = rhs.extract_unambiguous()
+
             # both literal
             else:
                 # if possible we ask for help from expected_type
                 if expected_type != None and expr_type.types_compatible(expected_type):
                     lhs = self.expression(tree.children[0], expected_type)
+                    if isinstance(lhs, NodeOptions):
+                        lhs = lhs.extract_unambiguous()
                     rhs = self.expression(tree.children[2], expected_type)
+                    if isinstance(rhs, NodeOptions):
+                        rhs = rhs.extract_unambiguous()
                     assert lhs.type.types_compatible(rhs.type)
                     expr_type = lhs.type
 
                 # no expectation, let them infer their own types
                 elif expected_type == None:
                     lhs = self.expression(tree.children[0], self.get_infer_type())
+                    if isinstance(lhs, NodeOptions):
+                        lhs = lhs.extract_unambiguous()
                     rhs = self.expression(tree.children[2], self.get_infer_type())
+                    if isinstance(rhs, NodeOptions):
+                        rhs = rhs.extract_unambiguous()
                     assert lhs.type.types_compatible(rhs.type)
                     expr_type = lhs.type
                 
@@ -1016,6 +1055,8 @@ class CompCtx:
             case "dot":
                 # TODO: Has to use the type of rhs for node type, can only be done once types and field lookup exist
                 lhs = self.expression(tree.children[0], None)
+                if isinstance(lhs, NodeOptions):
+                    lhs = lhs.extract_unambiguous()
                 rhs = tree.children[2].children[0].value
 
                 match lhs.type.kind:
@@ -1033,30 +1074,37 @@ class CompCtx:
                     case TypeKind.module:
                         assert isinstance(lhs, NodeSymbol)
                         assert isinstance(lhs.type.data, Module)
+                        options = NodeOptions(self.get_unit_type())
                         for sym in lhs.type.data.global_scope.iter_syms(name=rhs, shallow=True, only_public=True, include_magics=False):
-                            # TODO: Ambiguous syms for overloads!!
-                            return NodeDotAccess(lhs, sym)
-                        assert False, f"Could not find {rhs} in module {lhs.render()}"
+                            options.options.append(NodeSymbol(sym, sym.type))
+                        if len(options.options) < 1:
+                            raise ValueError(f"Could not find {rhs} in module {lhs.render()}")
+                        return NodeDotAccess(lhs, options)
                     case _:
                         raise SerqInternalError(f"Dot operations for type kind `{lhs.type.kind.name}` are not yet allowed")
             case _:
                 raise SerqInternalError(f"Unimplemented binary op: {op}")
 
 
-    def identifier(self, tree: Tree, expected_type: Type) -> NodeSymbol:
+    def identifier(self, tree: Tree, expected_type: Type) -> NodeOptions:
         assert tree.data == "identifier", tree.data
         val = tree.children[0].value
-        sym = self.current_scope.lookup(val)
-        if sym:
-            if expected_type != None:
-                assert sym.type.types_compatible(expected_type)
-            return NodeSymbol(sym, type=sym.type)
+
+        res = NodeOptions(self.get_unit_type()) # TODO: Could use an error type to ensure consistent analysis later
+        for sym in self.current_scope.iter_syms(val):
+            if expected_type != None and not sym.type.types_compatible(expected_type):
+                continue
+            res.options.append(NodeSymbol(sym, sym.type))
+
+        if len(res.options) > 0:
+            return res
         # TODO: Error reporting
         raise ValueError(f"Bad identifier: {val}")
 
-    def user_type(self, tree: Tree, expected_type: Type) -> NodeSymbol:
+    def user_type(self, tree: Tree) -> NodeSymbol:
         assert tree.data in ["user_type", "return_user_type"], tree.data
-        return self.identifier(tree.children[0], None) # TODO: Enforce `type` metatype
+        options = self.identifier(tree.children[0], None) # TODO: Enforce `type` metatype
+        return options.extract_unambiguous() # TODO: Allow ambigous names and infer based on context?
 
     def assignment(self, tree: Tree, expected_type: Type) -> NodeAssignment:
         assert tree.data == "assignment", tree.data
@@ -1064,7 +1112,11 @@ class CompCtx:
         assert expected_type.kind == TypeKind.unit
 
         lhs = self.expression(tree.children[0], None)
+        if isinstance(lhs, NodeOptions):
+            lhs = lhs.extract_unambiguous()
         rhs = self.expression(tree.children[1], lhs.type)
+        if isinstance(rhs, NodeOptions):
+            rhs = rhs.extract_unambiguous()
         assert lhs.type.types_compatible(rhs.type)
 
         def report_immutable(sym: Symbol):
@@ -1108,7 +1160,7 @@ class CompCtx:
             type_tree = tree.children[f]
             # TODO: Return an empty node with empty type
             # TODO: Have expected type be `type` metatype
-            type_sym = self.user_type(type_tree, None)
+            type_sym = self.user_type(type_tree)
             f += 1
         
         val_node_expected_type = type_sym.type if type_sym != None else self.get_infer_type()
@@ -1154,6 +1206,8 @@ class CompCtx:
         expr = None
         if tree.children[0] != None:
             expr = self.expression(tree.children[0], self.current_deferred_ret_type)
+            if isinstance(expr, NodeOptions):
+                expr = expr.use_first()
         else:
             expr = NodeEmpty(self.current_deferred_ret_type)
         assert self.current_deferred_ret_type.types_compatible(expr.type), f"Incompatible return({expr.type.sym.render()}) for function type({self.current_deferred_ret_type.render()})"
@@ -1167,13 +1221,17 @@ class CompCtx:
 
         alias_name = tree.children[0].children[0].value
         alias_sym = self.current_scope.put(alias_name)
-        alias_sym.type = src.type
-        alias_sym.mutable = src.symbol.mutable
-        alias_sym.magic = src.symbol.magic
+        
+        unambig_node = src.extract_unambiguous()
+        alias_sym.type = unambig_node.type
+        if not isinstance(unambig_node, NodeSymbol):
+            raise ValueError("Taking an alias of something that isn't a symbol isn't allowed")
+        alias_sym.mutable = unambig_node.symbol.mutable
+        alias_sym.magic = unambig_node.symbol.magic
         # TODO: Exporting aliases
         # alias_sym.exported = ...
 
-        res_node = NodeAliasDefinition(alias_sym, src.symbol, self.get_unit_type())
+        res_node = NodeAliasDefinition(alias_sym, unambig_node.symbol, self.get_unit_type())
         alias_sym.definition_node = res_node
         return res_node
 
@@ -1185,7 +1243,7 @@ class CompCtx:
         sym = self.current_scope.put_let(ident, checked=True, shallow=True)
 
         # TODO: Assert that this is actually a type sym. Current system isn't ready yet
-        typ_sym_node = self.user_type(tree.children[1], None)
+        typ_sym_node = self.user_type(tree.children[1])
 
         sym.type = typ_sym_node.type
 
@@ -1256,7 +1314,7 @@ class CompCtx:
             # TODO: Mutable args
             ident = child.children[0].children[0].value
             sym = self.current_scope.put_let(ident, shallow=True) # effectively a let that permits shallow shadowing
-            type_node = self.user_type(child.children[1], None)
+            type_node = self.user_type(child.children[1])
             sym.type = type_node.symbol.type # TODO: This is not clean at all
             params.append((NodeSymbol(sym, sym.type), type_node))
 
@@ -1279,7 +1337,7 @@ class CompCtx:
         ret_type_node = NodeSymbol(self.get_unit_type().sym, self.get_unit_type())
         ret_type = ret_type_node.type
         if tree.children[3] != None:
-            ret_type_node = self.user_type(tree.children[3], None)
+            ret_type_node = self.user_type(tree.children[3])
             ret_type = ret_type_node.type # TODO: Fix this nonsense, type should be `type`, not whatever the type evaluates to
 
         # TODO: Use a type cache to load function with the same type from it for easier matching
@@ -1307,61 +1365,71 @@ class CompCtx:
         sym.definition_node = res
         return res
 
+    def resolve_call(self, callee_node: Node, unresolved_args: list[Tree]) -> Optional[NodeFnCall]:
+        def _resolve_call_impl(callee_node: Node, unresolved_args: list[Tree]) -> list[NodeFnCall]:
+            match callee_node:
+                case NodeOptions():
+                    candidates = []
+                    for option in callee_node.options:
+                        candidates.extend(_resolve_call_impl(option, unresolved_args))
+                    return candidates
+                case NodeSymbol():
+                    match callee_node.type.kind:
+                        case TypeKind.function:
+                            # TODO: This will be wrong with optional args
+                            if len(callee_node.type.function_arg_types()) != len(unresolved_args):
+                                return []
+                            params = []
+                            for i in range(0, len(unresolved_args)):
+                                formal_type = callee_node.type.function_arg_types()[i]
+                                try:
+                                    resolved_arg = self.expression(unresolved_args[i], formal_type)
+                                    if isinstance(resolved_arg, NodeOptions):
+                                        resolved_arg = resolved_arg.extract_unambiguous()
+                                    if not resolved_arg.type.types_compatible(formal_type):
+                                        return []
+                                    params.append(resolved_arg)
+                                except SerqTypeInferError:
+                                    return []
+                            return [NodeFnCall(
+                                callee=callee_node,
+                                original_callee=callee_node, # adjusted by dot case
+                                args=params,
+                                type=callee_node.type.return_type(),
+                            )]
+                        case TypeKind.type:
+                            if len(unresolved_args) != 0:
+                                raise SerqInternalError("Cannot yet handle calls to types with parameters")
+                            return [NodeFnCall(
+                                callee=callee_node,
+                                original_callee=callee_node, # adjusted by dot case
+                                args=[],
+                                type=callee_node.type,
+                            )]
+                case NodeDotAccess():
+                    candidates = _resolve_call_impl(callee_node.rhs, unresolved_args)
+                    for candidate in candidates:
+                        candidate.original_callee = callee_node
+                    return candidates
+                case _:
+                    raise ValueError(f"Calling a {type(callee_node)} is not currently supported")
+        # Open a scope here to prevent symbol pollution during param fitting
+        # TODO: Not needed once transformation syms exist
+        self.open_scope()
+        candidates = _resolve_call_impl(callee_node, unresolved_args)
+        self.close_scope()
+        if len(candidates) > 1:
+            raise SerqInternalError("Cannot perform complex function disambiguation yet")
+        if len(candidates) == 1:
+            return candidates[0]
+
     def fn_call_expr(self, tree: Tree, expected_type: Type) -> NodeFnCall:
         assert tree.data == "fn_call_expr", tree.data
-        # TODO: Once overloads/methods are in, this must scan visible symbols and retrieve a list. Handled in identifier though
-        passed_arg_count = len(tree.children[1].children) if tree.children[1].children[0] != None else 0
-
-        callee = None
-        params = []
-        if len(tree.children[0].children) > 0 and tree.children[0].children[0].data == "identifier":
-            # TODO: Better handling, use a candidate node instead
-            for fn in self.current_scope.iter_function_defs(tree.children[0].children[0].children[0].value):
-                if fn.type.kind == TypeKind.type:
-                    assert passed_arg_count == 0, "Calling a struct with arguments is not yet supported" # TODO 
-                    callee = NodeSymbol(fn, fn.type)
-                    break
-                else:
-                    if passed_arg_count != len(fn.type.function_arg_types()):
-                        continue
-                    matches = True
-                    # TODO: This will be wrong once optional args are in
-                    for i in range(0, passed_arg_count):
-                        resolved_arg = self.expression(tree.children[1].children[i], fn.type.function_arg_types()[i])
-                        if not resolved_arg.type.types_compatible(fn.type.function_arg_types()[i]):
-                            matches = False
-                            break
-                        params.append(resolved_arg)
-                    if matches:
-                        callee = NodeSymbol(fn, fn.type)
-                        break
-                params = []
-        else:
-            callee = self.expression(tree.children[0], None)
-        # TODO: allow non-symbol calls i.e. function pointers
-        assert callee != None, f"No matching overload found for {tree.children[0].children[0].children[0]}"
-
-        original_callee = callee
-        if isinstance(callee, NodeDotAccess):
-            callee = NodeSymbol(callee.rhs, callee.type)
-
-        if not isinstance(callee, NodeSymbol):
-            raise SerqInternalError(f"Unimplemented call type: {type(callee)}")
-
-        ret_type = None
-        if callee.type.kind == TypeKind.type:
-            ret_type = callee.type
-        else:
-            ret_type = callee.symbol.type.return_type()
-            if ret_type == None:
-                ret_type = self.current_scope.lookup_type("unit", shallow=True)
-
-        return NodeFnCall(
-            callee=callee,
-            original_callee=original_callee,
-            args=params,
-            type=ret_type
-        )
+        callee_node = self.expression(tree.children[0], None)
+        call = self.resolve_call(callee_node, tree.children[1].children if tree.children[1].children[0] != None else [])
+        if call == None:
+            raise ValueError(f"No matching overload found for {tree.children[0].children[0].children[0]}")
+        return call
 
     def expression(self, tree: Tree, expected_type: Type) -> Node:
         assert tree.data == "expression", tree.data
@@ -1397,7 +1465,7 @@ class CompCtx:
         if len(result) == 1:
             return result[0]
         else:
-            assert False
+            raise SerqInternalError(f"Invalid expression length")
 
     def start(self, tree: Tree) -> NodeStmtList:
         assert tree.data == "start", tree.data

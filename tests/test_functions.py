@@ -85,7 +85,7 @@ abc()
 
 
 def test_function_call_symbol(executor):
-    with pytest.raises(SerqInternalError):
+    with pytest.raises(ValueError):
         executor("""
 true()
 """)
@@ -187,6 +187,6 @@ def test_forward_calls(capture_first_debug, code, expected):
 
 @pytest.mark.parametrize("code", forward_calls_tests_failing)
 def test_forward_calls_failing(executor, code):
-    with pytest.raises(AssertionError):
+    with pytest.raises(ValueError):
         executor(code)
 
