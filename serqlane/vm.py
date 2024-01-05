@@ -197,9 +197,11 @@ class SerqVM:
                     assert isinstance(expression.callee, NodeSymbol)
                     # TODO: make symbol generic for definition node
                     fn_def: NodeFnDefinition = expression.callee.symbol.definition_node  # type: ignore (olaf code)
+                    logger.debug(f"{expression.args=} {expression.render()}")
                     for i in range(0, len(expression.args)):
                         val = self.eval(expression.args[i])
                         sym = fn_def.params.args[i][0].symbol
+                        logger.debug(f"pushing {sym} with value {val} on stack")
                         self.push_value_on_stack(sym, val)
 
                     try:
