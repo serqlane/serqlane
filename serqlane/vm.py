@@ -74,10 +74,20 @@ class Unit:
 
 
 SERQ_TO_C_TYPE = {
+    TypeKind.bool: ctypes.c_bool,
+    TypeKind.char: ctypes.c_char,
+    TypeKind.int8: ctypes.c_int8,
+    TypeKind.int16: ctypes.c_int16,
     TypeKind.int32: ctypes.c_int32,
-    TypeKind.float32: ctypes.c_float,
     TypeKind.int64: ctypes.c_int64,
+    TypeKind.uint8: ctypes.c_uint8,
+    TypeKind.uint16: ctypes.c_uint16,
+    TypeKind.uint32: ctypes.c_uint32,
+    TypeKind.uint64: ctypes.c_uint64,
+    TypeKind.float32: ctypes.c_float,
     TypeKind.float64: ctypes.c_double,
+    # TODO: what type is expected here?
+    #TypeKind.pointer: ctypes.c_void_p,
 }
 
 
@@ -350,25 +360,3 @@ class SerqVM:
 
         self.enter_scope()
         self.execute_node(start)
-
-
-if __name__ == "__main__":
-    code = """
-let x = {
-    "1 + 1"
-}
-dbg(x)
-"""
-
-    import socket
-
-    if socket.gethostname() == "starrnix":
-        logger.setLevel(logging.DEBUG)
-        logger.addHandler(logging.StreamHandler())
-
-    graph = ModuleGraph()
-    module = graph.load("<string>", code)
-    #print(module.ast.render())
-
-    vm = SerqVM()
-    vm.execute_module(module)
