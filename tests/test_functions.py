@@ -1,5 +1,7 @@
 import pytest
 
+from serqlane.astcompiler import SerqInternalError
+
 
 # code, variable, expected
 return_tests = [
@@ -83,7 +85,7 @@ abc()
 
 
 def test_function_call_symbol(executor):
-    with pytest.raises(AssertionError):
+    with pytest.raises(SerqInternalError):
         executor("""
 true()
 """)
