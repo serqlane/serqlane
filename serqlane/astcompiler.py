@@ -1586,7 +1586,7 @@ class ModuleGraph:
     def request_module(self, name: str) -> Optional[Module]:
         if name in self.modules:
             return self.modules[name]
-        elif pathlib.Path(name).is_file():
-            return self.load(name, pathlib.Path("").read_text())
+        elif pathlib.Path(name + ".serq").is_file():
+            return self.load(name, pathlib.Path(name + ".serq").read_text())
         else:
             raise ValueError(f"Unable to find import: {name}")
