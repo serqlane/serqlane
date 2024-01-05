@@ -879,7 +879,7 @@ class CompCtx:
         if expected_type != None:
             last = self.statement(last_child, expected_type)
             if isinstance(last, NodeOptions):
-                last = last.extract_unambiguous()
+                last = last.use_first()
             result.add(last)
             # TODO: Get rid of check here once shadow syms are in
             assert expected_type.types_compatible(result.children[-1].type), f"Expected type {expected_type.sym.render()} for block but got {result.children[-1].type.sym.render()}"
@@ -948,14 +948,14 @@ class CompCtx:
         assert tree.data == "binary_expression", tree.data
         lhs = self.expression(tree.children[0], None)
         if isinstance(lhs, NodeOptions):
-            lhs = lhs.extract_unambiguous()
+            lhs = lhs.use_first()
         # TODO: Can the symbol be captured somehow?
         op = tree.children[1].data.value
         # a dot expression does not work by the same type rules
         if op != "dot":
             rhs = self.expression(tree.children[2], None)
             if isinstance(rhs, NodeOptions):
-                rhs = rhs.extract_unambiguous()
+                rhs = rhs.use_first()
 
             # TODO: Dot expr
             if not lhs.type.types_compatible(rhs.type):
@@ -972,11 +972,11 @@ class CompCtx:
             if lhs.type.kind in literal_types and rhs.type.kind not in literal_types:
                 lhs = self.expression(tree.children[0], rhs.type)
                 if isinstance(lhs, NodeOptions):
-                    lhs = lhs.extract_unambiguous()
+                    lhs = lhs.use_first()
             elif rhs.type.kind in literal_types and lhs.type.kind not in literal_types:
                 rhs = self.expression(tree.children[2], lhs.type)
                 if isinstance(rhs, NodeOptions):
-                    rhs = rhs.extract_unambiguous()
+                    rhs = rhs.use_first()
 
             # both literal
             else:
@@ -984,10 +984,10 @@ class CompCtx:
                 if expected_type != None and expr_type.types_compatible(expected_type):
                     lhs = self.expression(tree.children[0], expected_type)
                     if isinstance(lhs, NodeOptions):
-                        lhs = lhs.extract_unambiguous()
+                        lhs = lhs.use_first()
                     rhs = self.expression(tree.children[2], expected_type)
                     if isinstance(rhs, NodeOptions):
-                        rhs = rhs.extract_unambiguous()
+                        rhs = rhs.use_first()
                     assert lhs.type.types_compatible(rhs.type)
                     expr_type = lhs.type
 
@@ -995,10 +995,10 @@ class CompCtx:
                 elif expected_type == None:
                     lhs = self.expression(tree.children[0], self.get_infer_type())
                     if isinstance(lhs, NodeOptions):
-                        lhs = lhs.extract_unambiguous()
+                        lhs = lhs.use_first()
                     rhs = self.expression(tree.children[2], self.get_infer_type())
                     if isinstance(rhs, NodeOptions):
-                        rhs = rhs.extract_unambiguous()
+                        rhs = rhs.use_first()
                     assert lhs.type.types_compatible(rhs.type)
                     expr_type = lhs.type
                 
@@ -1056,7 +1056,7 @@ class CompCtx:
                 # TODO: Has to use the type of rhs for node type, can only be done once types and field lookup exist
                 lhs = self.expression(tree.children[0], None)
                 if isinstance(lhs, NodeOptions):
-                    lhs = lhs.extract_unambiguous()
+                    lhs = lhs.use_first() # TODO: This WILL cause bad symbol lookup
                 rhs = tree.children[2].children[0].value
 
                 match lhs.type.kind:
@@ -1113,10 +1113,10 @@ class CompCtx:
 
         lhs = self.expression(tree.children[0], None)
         if isinstance(lhs, NodeOptions):
-            lhs = lhs.extract_unambiguous()
+            lhs = lhs.use_first()
         rhs = self.expression(tree.children[1], lhs.type)
         if isinstance(rhs, NodeOptions):
-            rhs = rhs.extract_unambiguous()
+            rhs = rhs.use_first()
         assert lhs.type.types_compatible(rhs.type)
 
         def report_immutable(sym: Symbol):
@@ -1385,7 +1385,7 @@ class CompCtx:
                                 try:
                                     resolved_arg = self.expression(unresolved_args[i], formal_type)
                                     if isinstance(resolved_arg, NodeOptions):
-                                        resolved_arg = resolved_arg.extract_unambiguous()
+                                        resolved_arg = resolved_arg.use_first()
                                     if not resolved_arg.type.types_compatible(formal_type):
                                         return []
                                     params.append(resolved_arg)

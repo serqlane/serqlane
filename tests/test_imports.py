@@ -7,9 +7,8 @@ import_tests = [
         {"main": """
 import other
 
-fn a() -> unit {
+fn a() -> int64 {
     other.change_x(20)
-    return
 }
 
 dbg(a())
