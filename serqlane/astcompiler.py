@@ -3,6 +3,7 @@ from __future__ import annotations
 from enum import Enum, auto
 from typing import Any, Optional, Iterator
 
+import pathlib
 import hashlib
 import textwrap
 
@@ -298,14 +299,23 @@ class NodeFnDefinition(Node):
         return f"{pub_str}fn {self.sym.render()}({self.params.render()}) -> {self.sym.type.return_type().sym.render()} {self.body.render()}"
 
 class NodeFnCall(Node):
-    def __init__(self, callee: Node, args: list[Node], type: Type) -> None:
+    def __init__(self, callee: Node, original_callee: Node, args: list[Node], type: Type) -> None:
         super().__init__(type)
         self.callee = callee
+        self.original_callee = original_callee
         self.args = args
 
     def render(self) -> str:
         args = ", ".join([x.render() for x in self.args])
-        return f"{self.callee.render()}({args})"
+        return f"{self.original_callee.render()}({args})"
+
+class NodeImport(Node):
+    def __init__(self, module_sym: Symbol, type: Type) -> None:
+        super().__init__(type)
+        self.module_sym = module_sym
+
+    def render(self) -> str:
+        return f"import {self.module_sym.render()}"
 
 
 # TODO: Use these, will make later analysis easier
@@ -385,6 +395,8 @@ class TypeKind(Enum):
     generic_inst = auto() # fully instantiated generic type Type[int] or fn[int](): generic_inst[concerete_type, generic_type[params]]
     generic_type = auto() # Type[T] or fn[T](): generic_type[params]
     type = auto() # TODO: magic that holds a type itself, not yet in grammar
+
+    module = auto() # Comes from imports: `import x` -> x is a sym of type module
 
 int_types = frozenset([
     TypeKind.int8,
@@ -579,10 +591,11 @@ class Type:
 
 
 class Scope:
-    def __init__(self, graph: ModuleGraph) -> None:
+    def __init__(self, graph: ModuleGraph, module: Optional[Module] = None) -> None:
         self._local_syms: list[Symbol] = []
         self.module_graph = graph # TODO: Get rid of builtin hack
-        
+        self.module = module
+
         # A scope only has access to the immediate syms of their older siblings and their parent which repeats that rule.
         # This prevents out of order access during deferred body transformation.
         # Note: Functions and structs are always added to the oldest sibling to enable mutual dependencies.
@@ -647,6 +660,9 @@ class Scope:
         if sym != None:
             return sym.type
 
+    def inject(self, sym: Symbol):
+        self._local_syms.append(sym)
+
     def put(self, name: str, checked=True, shallow=False) -> Symbol:
         assert type(name) == str
         if checked and self.lookup(name, shallow=shallow): raise ValueError(f"redefinition of {name}")
@@ -655,7 +671,7 @@ class Scope:
             raise ValueError(f"Cannot use reserved keyword `{name}` as a symbol name")
 
         result = Symbol(self.module_graph.sym_id_gen.next(), name=name)
-        self._local_syms.append(result)
+        self.inject(result)
         return result
     
     def put_function(self, name: str, type: Type) -> Symbol:
@@ -777,7 +793,11 @@ class CompCtx:
 
 
     def handle_import(self, tree: Tree):
-        raise NotImplementedError()
+        # TODO: More complex handling. Doing it like this has millions of issues, but good enough for first prototype
+        import_path = tree.children[0].children[0].value
+        module = self.graph.request_module(import_path)
+        self.current_scope.inject(module.sym)
+        return NodeImport(module.sym, self.get_unit_type())
 
     def handle_break_or_continue(self, tree: Tree, expected_type: Type) -> NodeBreak | NodeContinue:
         assert tree.data in ["break_stmt", "continue_stmt"], tree.data
@@ -996,19 +1016,29 @@ class CompCtx:
             case "dot":
                 # TODO: Has to use the type of rhs for node type, can only be done once types and field lookup exist
                 lhs = self.expression(tree.children[0], None)
-                assert lhs.type.kind == TypeKind.type, f"Dot operations for type {lhs.type.sym.render()} are not yet allowed" # TODO: Allow any type here, required for universal function calling syntax
                 rhs = tree.children[2].children[0].value
 
-                assert isinstance(lhs.type.sym.definition_node, NodeStructDefinition), "Dot operations are currently only ready for structs"
-                matching_field_sym = None
-                # TODO: Do a scope-esque lookup instead. Things like inheritance may silently add more things later
-                for field in lhs.type.sym.definition_node.fields:
-                    if field.sym.name == rhs:
-                        matching_field_sym = field.sym
-                        break
-                assert matching_field_sym != None, f"Could not find {rhs} for {lhs.type.sym.render()}"
+                match lhs.type.kind:
+                    case TypeKind.type:
+                        assert isinstance(lhs.type.sym.definition_node, NodeStructDefinition), "Dot operations are currently only ready for structs"
+                        matching_field_sym = None
+                        # TODO: Do a scope-esque lookup instead. Things like inheritance may silently add more things later
+                        for field in lhs.type.sym.definition_node.fields:
+                            if field.sym.name == rhs:
+                                matching_field_sym = field.sym
+                                break
+                        assert matching_field_sym != None, f"Could not find {rhs} for {lhs.type.sym.render()}"
 
-                return NodeDotAccess(lhs, matching_field_sym)
+                        return NodeDotAccess(lhs, matching_field_sym)
+                    case TypeKind.module:
+                        assert isinstance(lhs, NodeSymbol)
+                        assert isinstance(lhs.type.data, Module)
+                        for sym in lhs.type.data.global_scope.iter_syms(name=rhs, shallow=True, only_public=True, include_magics=False):
+                            # TODO: Ambiguous syms for overloads!!
+                            return NodeDotAccess(lhs, sym)
+                        assert False, f"Could not find {rhs} in module {lhs.render()}"
+                    case _:
+                        raise SerqInternalError(f"Dot operations for type kind `{lhs.type.kind.name}` are not yet allowed")
             case _:
                 raise SerqInternalError(f"Unimplemented binary op: {op}")
 
@@ -1310,7 +1340,13 @@ class CompCtx:
             callee = self.expression(tree.children[0], None)
         # TODO: allow non-symbol calls i.e. function pointers
         assert callee != None, f"No matching overload found for {tree.children[0].children[0].children[0]}"
-        assert isinstance(callee, NodeSymbol), "can only call symbols"
+
+        original_callee = callee
+        if isinstance(callee, NodeDotAccess):
+            callee = NodeSymbol(callee.rhs, callee.type)
+
+        if not isinstance(callee, NodeSymbol):
+            raise SerqInternalError(f"Unimplemented call type: {type(callee)}")
 
         ret_type = None
         if callee.type.kind == TypeKind.type:
@@ -1322,6 +1358,7 @@ class CompCtx:
 
         return NodeFnCall(
             callee=callee,
+            original_callee=original_callee,
             args=params,
             type=ret_type
         )
@@ -1376,8 +1413,6 @@ class CompCtx:
 class Module:
     def __init__(self, name: str, id: int, contents: str, graph: ModuleGraph) -> None:
         self.graph = graph
-        # TODO: Naming conflicts
-        self.imported_modules: list[Module] = []
 
         self.name = name
         self.global_scope = Scope(graph)
@@ -1390,6 +1425,7 @@ class Module:
 
         # TODO: Generics should use the same deferred trick, but they should not be removed from the deferred list
         self.deferred_fn_bodies: list[tuple[Symbol, Tree, Scope]] = []
+        self.sym: Optional[Symbol] = None
 
     def lookup_toplevel(self, name: str) -> Optional[Symbol]:
         return self.global_scope.lookup(name, shallow=True)
@@ -1437,7 +1473,6 @@ class ModuleGraph:
         self.builtin_scope.put_builtin_type(TypeKind.array)
         self.builtin_scope.put_builtin_type(TypeKind.static)
 
-
         # TODO: hack
         magic_sym = Symbol("-1", "magic")
         magic_type = Type(TypeKind.magic, magic_sym)
@@ -1451,6 +1486,13 @@ class ModuleGraph:
     def load(self, name: str, file_contents: str) -> Module:
         assert name not in self.modules
         mod = Module(name, self._next_id, file_contents, self)
+
+        # TODO: Proper sym generation
+        mod_sym = Symbol(":module:" + str(self._next_id), name, None)
+        mod_type = Type(TypeKind.module, mod_sym, data=mod)
+        mod_sym.type = mod_type
+        mod.sym = mod_sym
+
         self._next_id += 1
         self.modules[name] = mod
         # TODO: Make sure the module isn't already being processed
@@ -1472,3 +1514,11 @@ class ModuleGraph:
 
         mod.ast = ast
         return mod
+
+    def request_module(self, name: str) -> Optional[Module]:
+        if name in self.modules:
+            return self.modules[name]
+        elif pathlib.Path(name).is_file():
+            return self.load(name, pathlib.Path("").read_text())
+        else:
+            raise ValueError(f"Unable to find import: {name}")
