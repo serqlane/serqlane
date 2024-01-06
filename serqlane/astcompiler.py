@@ -336,6 +336,20 @@ class NodeImport(Node):
     def render(self) -> str:
         return f"import {self.module_sym.render()}"
 
+class NodeFromImport(Node):
+    def __init__(self, module_sym: Symbol, to_import: list[NodeOptions], type: Type, *, wildcard=False) -> None:
+        super().__init__(type)
+        self.module_sym = module_sym
+        self.to_import = to_import
+        self.wildcard = wildcard
+
+    def render(self) -> str:
+        if self.wildcard:
+            return f"from {self.module_sym.render()} import *"
+        else:
+            names = ", ".join([x.render() for x in self.to_import])
+            return f"from {self.module_sym.render()} import [{names}]"
+
 
 # TODO: Use these, will make later analysis easier
 class SymbolKind(Enum):
@@ -656,8 +670,8 @@ class Scope:
                 continue
             yield sym
 
-    def iter_function_defs(self, name: Optional[str] = None) -> Iterator[Symbol]:
-        for sym in self.iter_syms(name):
+    def iter_function_defs(self, name: Optional[str] = None, only_public=False) -> Iterator[Symbol]:
+        for sym in self.iter_syms(name, only_public=only_public):
             if sym.type.kind in callable_types:
                 yield sym
 
@@ -807,9 +821,27 @@ class CompCtx:
                 return self.handle_block(child, expected_type)
             case "import_stmt":
                 return self.handle_import(child)
+            case "import_all_from_stmt":
+                return self.handle_from_import(child, wildcard=True)
             case _:
                 raise SerqInternalError(f"Unimplemented statement type: {child.data}")
 
+    def handle_from_import(self, tree: Tree, *, wildcard: bool):
+        print(tree.pretty())
+        import_path = tree.children[0].children[0].value
+        module = self.graph.request_module(import_path)
+        # TODO: Rework imports slightly to properly restrict namespaced lookup for these
+        if wildcard:
+            for sym in module.global_scope.iter_function_defs(only_public=True):
+                self.current_scope.inject(sym)
+            return NodeFromImport(
+                module_sym=module.sym,
+                to_import=[],
+                type=self.get_unit_type(),
+                wildcard=True
+            )
+        else:
+            raise NotImplementedError()
 
     def handle_import(self, tree: Tree):
         # TODO: More complex handling. Doing it like this has millions of issues, but good enough for first prototype
