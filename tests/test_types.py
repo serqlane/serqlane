@@ -1,9 +1,11 @@
 import pytest
 
+from serqlane.astcompiler import SerqTypeInferError
+
 
 def test_invalid_cohersion(executor):
     # TODO: this should probably raise a better exception
-    with pytest.raises(AssertionError):
+    with pytest.raises(SerqTypeInferError):
         executor('let x: int64 = "abc"')
 
 
