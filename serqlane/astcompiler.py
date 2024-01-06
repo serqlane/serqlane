@@ -628,8 +628,11 @@ class Scope:
         self._local_syms: list[Symbol] = []
         self.module_graph = graph # TODO: Get rid of builtin hack
         self.module = module
-        # only the oldest sibling should use this
-        self._imported_syms: dict[Module, list[Symbol]] = {} # this is a dict because they should be ordered in python, so the semantics are valid here
+
+        # only the oldest sibling should use these
+        self._imported_modules: set[Module] = set() # for `import x`
+        # this is a dict because they should be ordered in python, so the semantics are valid here
+        self._imported_syms: dict[Module, list[Symbol]] = {} # for `from x import [a]`
 
         # A scope only has access to the immediate syms of their older siblings and their parent which repeats that rule.
         # This prevents out of order access during deferred body transformation.
@@ -649,7 +652,16 @@ class Scope:
         if self.parent != None:
             yield from self.parent.iter_module_imports(module) # TODO: Should "stacked" from imports even be allowed?
 
+    def iter_imported_modules(self) -> Iterator[Module]:
+        oldest = self.get_oldest_sibling()
+        for module in oldest._imported_modules:
+            yield module
+        if self.parent != None:
+            yield from self.parent.iter_imported_modules()
+
     def is_imported(self, module: Module, sym: Symbol) -> bool:
+        if module in set(self.iter_imported_modules()):
+            return True # This is dangerous. It only works because "valid" symbols are guaranteed elsewhere
         for isym in self.iter_module_imports(module):
             if isym == sym:
                 return True
@@ -657,6 +669,7 @@ class Scope:
 
     # TODO: Add a check to prevent conflicts
     def do_basic_import(self, node: NodeImport):
+        self._imported_modules.add(node.module_sym.type.data)
         self.get_oldest_sibling().inject(node.module_sym)
 
     def do_from_import(self, node: NodeFromImport):
