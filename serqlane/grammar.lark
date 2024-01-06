@@ -3,7 +3,8 @@ start: statement*
 
 // TODO: Paths
 import_stmt: "import" identifier
-import_from_stmt: "from" identifier "import" "[" [identifier ("," identifier)*] "]"
+import_list: identifier ("," identifier)*
+import_from_stmt: "from" identifier "import" "[" [import_list] "]"
 import_all_from_stmt: "from" identifier "import" "*"
 ?import_statements: import_stmt | import_from_stmt | import_all_from_stmt
 

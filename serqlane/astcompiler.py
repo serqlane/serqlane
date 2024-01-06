@@ -628,19 +628,51 @@ class Scope:
         self._local_syms: list[Symbol] = []
         self.module_graph = graph # TODO: Get rid of builtin hack
         self.module = module
+        # only the oldest sibling should use this
+        self._imported_syms: dict[Module, list[Symbol]] = {} # this is a dict because they should be ordered in python, so the semantics are valid here
 
         # A scope only has access to the immediate syms of their older siblings and their parent which repeats that rule.
         # This prevents out of order access during deferred body transformation.
         # Note: Functions and structs are always added to the oldest sibling to enable mutual dependencies.
         self.parent: Scope = None
-        self.older_sibling: Scope = None # Can actually be represented as a parent, but this is good enough for now
+        self.older_sibling: Optional[Scope] = None # Can actually be represented as a parent, but this is good enough for now
 
     def get_oldest_sibling(self) -> Scope:
         if self.older_sibling != None:
             return self.older_sibling.get_oldest_sibling()
         return self
+    
+    def iter_module_imports(self, module: Module) -> Iterator[Symbol]:
+        oldest = self.get_oldest_sibling()
+        for sym in oldest._imported_syms.get(module, []):
+            yield sym
+        if self.parent != None:
+            yield from self.parent.iter_module_imports(module) # TODO: Should "stacked" from imports even be allowed?
 
-    def _iter_syms_impl(self, shallow=False, *, include_magics=True) -> Iterator[Symbol]:
+    def is_imported(self, module: Module, sym: Symbol) -> bool:
+        for isym in self.iter_module_imports(module):
+            if isym == sym:
+                return True
+        return False
+
+    # TODO: Add a check to prevent conflicts
+    def do_basic_import(self, node: NodeImport):
+        self.get_oldest_sibling().inject(node.module_sym)
+
+    def do_from_import(self, node: NodeFromImport):
+        if node.wildcard:
+            syms = list(node.module_sym.type.data.global_scope.iter_syms(only_public=True, include_magics=False, include_imports=False))
+            self._imported_syms[node.module_sym.type.data] = syms
+        else:
+            syms = []
+            for options in node.to_import:
+                for option in options.options:
+                    if not isinstance(option, NodeSymbol):
+                        raise ValueError("Tried to import a non-symbol")
+                    syms.append(option.symbol)
+            self._imported_syms[node.module_sym.type.data] = syms
+
+    def _iter_syms_impl(self, shallow=False, *, include_magics=True, include_imports=False) -> Iterator[Symbol]:
         # prefer magics
         if self.module_graph.builtin_scope != self and include_magics:
             for sym in self.module_graph.builtin_scope._iter_syms_impl():
@@ -656,27 +688,38 @@ class Scope:
         while older != None:
             for sym in older._local_syms:
                 yield sym
+            if older.older_sibling == None:
+                break
             older = older.older_sibling
+        
+        # import lookup
+        # happens quite late because local syms are always preferred
+        if include_imports:
+            oldest = older if older != None else self
+            for mod, syms in oldest._imported_syms.items():
+                yield mod.sym
+                for sym in syms:
+                    yield sym
 
         # parent lookup
         if not shallow and self.parent != None:
-            yield from self.parent._iter_syms_impl(include_magics=False)
+            yield from self.parent._iter_syms_impl(include_magics=False, include_imports=include_imports)
 
-    def iter_syms(self, name: Optional[str] = None, shallow=False, *, include_magics=True, only_public=False) -> Iterator[Symbol]:
-        for sym in self._iter_syms_impl(shallow=shallow, include_magics=include_magics):
+    def iter_syms(self, name: Optional[str] = None, shallow=False, *, include_magics=True, only_public=False, include_imports=False) -> Iterator[Symbol]:
+        for sym in self._iter_syms_impl(shallow=shallow, include_magics=include_magics, include_imports=include_imports):
             if name != None and sym.name != name:
                 continue
             if only_public and not sym.public:
                 continue
             yield sym
 
-    def iter_function_defs(self, name: Optional[str] = None, only_public=False) -> Iterator[Symbol]:
-        for sym in self.iter_syms(name, only_public=only_public):
+    def iter_function_defs(self, name: Optional[str] = None, only_public=False, include_imports=True) -> Iterator[Symbol]:
+        for sym in self.iter_syms(name, only_public=only_public, include_imports=include_imports):
             if sym.type.kind in callable_types:
                 yield sym
 
     def _lookup_impl(self, name: str, shallow=False) -> Symbol:
-        for sym in self.iter_syms(name, shallow=shallow):
+        for sym in self.iter_syms(name, shallow=shallow, include_imports=True):
             return sym
         return None
 
@@ -823,32 +866,41 @@ class CompCtx:
                 return self.handle_import(child)
             case "import_all_from_stmt":
                 return self.handle_from_import(child, wildcard=True)
+            case "import_from_stmt":
+                return self.handle_from_import(child, wildcard=False)
             case _:
                 raise SerqInternalError(f"Unimplemented statement type: {child.data}")
 
     def handle_from_import(self, tree: Tree, *, wildcard: bool):
-        print(tree.pretty())
         import_path = tree.children[0].children[0].value
         module = self.graph.request_module(import_path)
-        # TODO: Rework imports slightly to properly restrict namespaced lookup for these
-        if wildcard:
-            for sym in module.global_scope.iter_function_defs(only_public=True):
-                self.current_scope.inject(sym)
-            return NodeFromImport(
-                module_sym=module.sym,
-                to_import=[],
-                type=self.get_unit_type(),
-                wildcard=True
-            )
-        else:
-            raise NotImplementedError()
+        to_import = []
+        if not wildcard:
+            if tree.children[1] != None:
+                for ident_node in tree.children[1].children:
+                    ident = ident_node.children[0].value
+                    option_node = NodeOptions(self.get_unit_type())
+                    for sym in module.global_scope.iter_syms(name=ident, include_magics=False, only_public=True):
+                        option_node.options.append(NodeSymbol(sym, sym.type))
+                    if len(option_node.options) == 0:
+                        raise ValueError(f"Could not find public symbol `{ident}` in module `{module.name}`")
+                    to_import.append(option_node)
+        res = NodeFromImport(
+            module_sym=module.sym,
+            to_import=to_import,
+            type=self.get_unit_type(),
+            wildcard=wildcard
+        )
+        self.current_scope.do_from_import(res)
+        return res
 
     def handle_import(self, tree: Tree):
         # TODO: More complex handling. Doing it like this has millions of issues, but good enough for first prototype
         import_path = tree.children[0].children[0].value
         module = self.graph.request_module(import_path)
-        self.current_scope.inject(module.sym)
-        return NodeImport(module.sym, self.get_unit_type())
+        res = NodeImport(module.sym, self.get_unit_type())
+        self.current_scope.do_basic_import(res)
+        return res
 
     def handle_break_or_continue(self, tree: Tree, expected_type: Type) -> NodeBreak | NodeContinue:
         assert tree.data in ["break_stmt", "continue_stmt"], tree.data
@@ -1108,7 +1160,8 @@ class CompCtx:
                         assert isinstance(lhs.type.data, Module)
                         options = NodeOptions(self.get_unit_type())
                         for sym in lhs.type.data.global_scope.iter_syms(name=rhs, shallow=True, only_public=True, include_magics=False):
-                            options.options.append(NodeSymbol(sym, sym.type))
+                            if self.current_scope.is_imported(lhs.type.data, sym):
+                                options.options.append(NodeSymbol(sym, sym.type))
                         if len(options.options) < 1:
                             raise ValueError(f"Could not find {rhs} in module {lhs.render()}")
                         return NodeDotAccess(lhs, options)
@@ -1123,9 +1176,7 @@ class CompCtx:
         val = tree.children[0].value
 
         res = NodeOptions(self.get_unit_type()) # TODO: Could use an error type to ensure consistent analysis later
-        for sym in self.current_scope.iter_syms(val):
-            if expected_type != None and not sym.type.types_compatible(expected_type):
-                continue
+        for sym in self.current_scope.iter_syms(val, include_imports=True):
             res.options.append(NodeSymbol(sym, sym.type))
 
         if len(res.options) > 0:
