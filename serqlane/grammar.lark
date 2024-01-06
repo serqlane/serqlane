@@ -1,7 +1,10 @@
 start: statement*
 
+
 // TODO: Paths
 import_stmt: "import" identifier
+import_from_stmt: "from" identifier "import" "[" [] "]"
+import_all_from_stmt: "from" identifier "import" "*"
 
 
 // TODO: generics for both types and functions
