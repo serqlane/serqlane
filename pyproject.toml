@@ -12,9 +12,13 @@ lark = "^1.1.5"
 
 [tool.poetry.group.test.dependencies]
 pytest = "^7.4.3"
+pytest-xdist = "^3.5.0"
 
 [tool.poetry.scripts]
 serqlane = "serqlane.__main__:main"
+
+[tool.pytest.ini_options]
+addopts = "-n auto"
 
 [build-system]
 requires = ["poetry-core"]
