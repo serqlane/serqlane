@@ -348,14 +348,14 @@ class SymbolKind(Enum):
 
 # TODO: Give every symbol a generation. Deferred function bodies should not be able to look up globals defined after themselves
 class Symbol:
-    def __init__(self, id: str, name: str, type: Type = None, mutable: bool = False, magic=False) -> None:
+    def __init__(self, id: str, name: str, type: Type, mutable: bool = False, magic=False) -> None:
         # TODO: Should store the source node, symbol kinds
         self.id = id
         self.name = name
         self.type = type
         self.public = False
         self.mutable = mutable
-        self.definition_node: Node = None
+        self.definition_node: Optional[Node] = None
         self.magic = magic
 
     def qualified_name(self):
@@ -495,7 +495,7 @@ class Type:
         return True
 
     # TODO: Turn into type_relation. literal<->concrete means uninstantiated_literal
-    def types_compatible(self, other: Type) -> bool:
+    def types_compatible(self, other: Type) -> bool: # type: ignore (pyright can't see the unimplemented error)
         """
         other is always the target
         """
@@ -586,15 +586,18 @@ class Type:
         assert self.kind in literal_types
         match self.kind:
             case TypeKind.literal_int:
-                return graph.builtin_scope.lookup_type("int64")
+                result = graph.builtin_scope.lookup_type("int64")
             case TypeKind.literal_float:
-                return graph.builtin_scope.lookup_type("float64")
+                result = graph.builtin_scope.lookup_type("float64")
             case TypeKind.literal_bool:
-                return graph.builtin_scope.lookup_type("bool")
+                result = graph.builtin_scope.lookup_type("bool")
             case TypeKind.literal_string:
-                return graph.builtin_scope.lookup_type("string")
+                result = graph.builtin_scope.lookup_type("string")
             case _:
                 raise SerqInternalError(f"Forgot a literal type: {self.kind}")
+
+        assert result is not None, f"literal of kind {self.kind} not added to builtin scope"
+        return result
 
     def render(self) -> str:
         # TODO: match on sets?
@@ -618,8 +621,8 @@ class Scope:
         # A scope only has access to the immediate syms of their older siblings and their parent which repeats that rule.
         # This prevents out of order access during deferred body transformation.
         # Note: Functions and structs are always added to the oldest sibling to enable mutual dependencies.
-        self.parent: Scope = None
-        self.older_sibling: Scope = None # Can actually be represented as a parent, but this is good enough for now
+        self.parent: Optional[Scope] = None
+        self.older_sibling: Optional[Scope] = None # Can actually be represented as a parent, but this is good enough for now
 
     def get_oldest_sibling(self) -> Scope:
         if self.older_sibling != None:
@@ -661,7 +664,7 @@ class Scope:
             if sym.type.kind in callable_types:
                 yield sym
 
-    def _lookup_impl(self, name: str, shallow=False) -> Symbol:
+    def _lookup_impl(self, name: str, shallow=False) -> Optional[Symbol]:
         for sym in self.iter_syms(name, shallow=shallow):
             return sym
         return None
@@ -761,6 +764,7 @@ class CompCtx:
         self.current_scope = self.current_scope.make_child()
 
     def close_scope(self):
+        assert self.current_scope.parent is not None, "called close_scope on scope with no parent"
         self.current_scope = self.current_scope.parent
 
     def enter_sibling_scope(self):
@@ -769,15 +773,15 @@ class CompCtx:
     def defer_fn_body(self, sym: Symbol, body: Tree):
         self.module.deferred_fn_bodies.append((sym, body, self.current_scope))
 
-
     def get_infer_type(self) -> Type:
         return Type(kind=TypeKind.infer, sym=None)
 
     def get_unit_type(self) -> Type:
-        return self.current_scope.lookup_type("unit", shallow=True)
+        result = self.current_scope.lookup_type("unit", shallow=True)
+        assert result is not None, "unit type missing in scope"
+        return result
 
-
-    def statement(self, tree: Tree, expected_type: Type) -> Node:
+    def statement(self, tree: Tree, expected_type: Optional[Type]) -> Node:
         assert tree.data == "statement", tree.data
         assert len(tree.children) == 1, f"{len(tree.children)} --- {tree.children=}"
 
@@ -1487,7 +1491,7 @@ class Module:
         self.id = id
         self.hash = hashlib.md5(contents.encode()).digest()
         self.lark_tree = SerqParser().parse(contents, display=False)
-        self.ast: Node = None
+        self.ast: Optional[Node] = None
         # mapping of (name, dict[params]) -> Type
         self.generic_cache: dict[tuple[str, dict[Symbol, Type]], Type] = {}
 
