@@ -916,7 +916,7 @@ class CompCtx:
     def handle_from_import(self, tree: Tree, *, wildcard: bool) -> NodeFromImport:
         import_path = tree.children[0].children[0].value
         names = []
-        if not wildcard and tree.children[1] != None:
+        if not wildcard and tree.children[1] is not None:
             for ident_node in tree.children[1].children:
                 ident = ident_node.children[0].value
                 names.append(ident)
@@ -1025,7 +1025,7 @@ class CompCtx:
         if literal_kind is TypeKind.literal_string:
             value = self.resolve_escape_sequence(value)
 
-        if expected_type != None:
+        if expected_type is not None:
             if expected_type.kind in free_infer_types:
                 expected_type = self.current_scope.lookup_type(lookup_name, shallow=False)
             else:
@@ -1366,8 +1366,8 @@ class CompCtx:
         assert tree.data == "struct_definition", tree.data
         assert expected_type.kind == TypeKind.unit
 
-        decorator = tree.children[0].children[0].children[0].value if tree.children[0] != None else ""
-        public = tree.children[1] != None
+        decorator = tree.children[0].children[0].children[0].value if tree.children[0] is not None else ""
+        public = tree.children[1] is not None
 
         ident = tree.children[2].children[0].value
         sym = None
