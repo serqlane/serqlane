@@ -1,0 +1,15 @@
+@magic pub type int8
+@magic pub type uint8
+@magic pub type int16
+@magic pub type uint16
+@magic pub type int32
+@magic pub type uint32
+@magic pub type int64
+@magic pub type uint64
+
+@magic pub type float32
+@magic pub type float64
+
+@magic pub type bool
+
+@magic pub type string

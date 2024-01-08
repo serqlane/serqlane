@@ -1,6 +1,11 @@
 start: statement*
 
 
+decorator: "@" identifier
+
+type_stmt: [decorator] [pub_marker] "type" identifier // TODO: Define structs in terms of this
+
+
 // TODO: Paths
 import_stmt: "import" identifier
 import_list: identifier ("," identifier)*
@@ -33,7 +38,7 @@ fn_call_expr: expression fn_call_args
 fn_call_args: "(" [expression ("," expression)*] ")"
 
 
-statement: ((return_stmt | break_stmt | continue_stmt | expression | assignment | let_stmt | import_statements) _TERMINATOR) | ( struct_definition | enum_definition | alias_definition | distinct_definition | fn_definition | block_stmt | while_stmt | if_stmt)
+statement: ((return_stmt | break_stmt | continue_stmt | expression | assignment | let_stmt | import_statements) _TERMINATOR) | (type_stmt | struct_definition | enum_definition | alias_definition | distinct_definition | fn_definition | block_stmt | while_stmt | if_stmt)
 
 // For now just identifier. Later should be a generic[T] expression that handles function types and others as well
 _type: identifier // TODO: Make it visible; get rid of _ for that

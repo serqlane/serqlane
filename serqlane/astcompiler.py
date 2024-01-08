@@ -14,6 +14,8 @@ from serqlane.parser import SerqParser
 
 DEBUG = False
 
+MAGIC_MODULE_NAME = "magics"
+
 
 RESERVED_KEYWORDS = [
     "and",
@@ -350,6 +352,16 @@ class NodeFromImport(Node):
             names = ", ".join([x.render() for x in self.to_import])
             return f"from {self.module_sym.render()} import [{names}]"
 
+class NodeTypeStmt(Node):
+    def __init__(self, sym: Symbol, type: Type):
+        super().__init__(type)
+        self.sym = sym
+    
+    def render(self) -> str:
+        magic_str = "@magic\n" if self.sym.magic else ""
+        pub_str = "pub " if self.sym.public else ""
+        return f"{magic_str}{pub_str}type {self.sym.render}"
+
 
 # TODO: Use these, will make later analysis easier
 class SymbolKind(Enum):
@@ -597,16 +609,18 @@ class Type:
         """
         Turns a literal into a concrete type
         """
+        # TODO: Move this out of Type. A type shouldn't instantiate itself for lack of context.
+        #       Evident by the lookups below, will break stuff very soon
         assert self.kind in literal_types
         match self.kind:
             case TypeKind.literal_int:
-                return graph.builtin_scope.lookup_type("int64")
+                return graph.request_module(MAGIC_MODULE_NAME).global_scope.lookup_type("int64")
             case TypeKind.literal_float:
-                return graph.builtin_scope.lookup_type("float64")
+                return graph.request_module(MAGIC_MODULE_NAME).global_scope.lookup_type("float64")
             case TypeKind.literal_bool:
-                return graph.builtin_scope.lookup_type("bool")
+                return graph.request_module(MAGIC_MODULE_NAME).global_scope.lookup_type("bool")
             case TypeKind.literal_string:
-                return graph.builtin_scope.lookup_type("string")
+                return graph.request_module(MAGIC_MODULE_NAME).global_scope.lookup_type("string")
             case _:
                 raise SerqInternalError(f"Forgot a literal type: {self.kind}")
 
@@ -881,23 +895,33 @@ class CompCtx:
                 return self.handle_from_import(child, wildcard=True)
             case "import_from_stmt":
                 return self.handle_from_import(child, wildcard=False)
+            case "type_stmt":
+                return self.type_stmt(child)
             case _:
                 raise SerqInternalError(f"Unimplemented statement type: {child.data}")
 
-    def handle_from_import(self, tree: Tree, *, wildcard: bool):
-        import_path = tree.children[0].children[0].value
+    def type_stmt(self, tree: Tree) -> NodeTypeStmt:
+        decorator = tree.children[0].children[0].children[0].value if tree.children[0] != None else ""
+        public = tree.children[1] != None
+        ident = tree.children[2].children[0].value
+        if decorator == "magic":
+            sym = self.current_scope.get_oldest_sibling().put_builtin_type(TypeKind[ident])
+            sym.public = public
+            return NodeTypeStmt(sym, self.get_unit_type())
+        else:
+            raise NotImplementedError("Non-magic types aren't supported until struct syntax is removed")
+
+    def make_from_import_node(self, import_path: str, names = [], *, wildcard: bool) -> NodeFromImport:
         module = self.graph.request_module(import_path)
         to_import = []
         if not wildcard:
-            if tree.children[1] != None:
-                for ident_node in tree.children[1].children:
-                    ident = ident_node.children[0].value
-                    option_node = NodeOptions(self.get_unit_type())
-                    for sym in module.global_scope.iter_syms(name=ident, include_magics=False, only_public=True):
-                        option_node.options.append(NodeSymbol(sym, sym.type))
-                    if len(option_node.options) == 0:
-                        raise ValueError(f"Could not find public symbol `{ident}` in module `{module.name}`")
-                    to_import.append(option_node)
+            for ident in names:
+                option_node = NodeOptions(self.get_unit_type())
+                for sym in module.global_scope.iter_syms(name=ident, include_magics=False, only_public=True):
+                    option_node.options.append(NodeSymbol(sym, sym.type))
+                if len(option_node.options) == 0:
+                    raise ValueError(f"Could not find public symbol `{ident}` in module `{module.name}`")
+                to_import.append(option_node)
         res = NodeFromImport(
             module_sym=module.sym,
             to_import=to_import,
@@ -906,6 +930,15 @@ class CompCtx:
         )
         self.current_scope.do_from_import(res)
         return res
+
+    def handle_from_import(self, tree: Tree, *, wildcard: bool) -> NodeFromImport:
+        import_path = tree.children[0].children[0].value
+        names = []
+        if not wildcard and tree.children[1] != None:
+            for ident_node in tree.children[1].children:
+                ident = ident_node.children[0].value
+                names.append(ident)
+        return self.make_from_import_node(import_path=import_path, names=names, wildcard=wildcard)
 
     def handle_import(self, tree: Tree):
         # TODO: More complex handling. Doing it like this has millions of issues, but good enough for first prototype
@@ -1010,9 +1043,9 @@ class CompCtx:
         if literal_kind is TypeKind.literal_string:
             value = self.resolve_escape_sequence(value)
 
-        if expected_type is not None:
+        if expected_type != None:
             if expected_type.kind in free_infer_types:
-                expected_type = self.current_scope.lookup_type(lookup_name, shallow=True)
+                expected_type = self.current_scope.lookup_type(lookup_name, shallow=False)
             else:
                 if not expected_type.types_compatible(Type(literal_kind, sym=None)):
                     raise SerqTypeInferError()
@@ -1261,6 +1294,8 @@ class CompCtx:
         
         val_node_expected_type = type_sym.type if type_sym != None else self.get_infer_type()
         val_node = self.expression(tree.children[f], val_node_expected_type)
+        if isinstance(val_node, NodeOptions):
+            val_node = val_node.extract_unambiguous()
         if val_node.type.kind == TypeKind.unit:
             raise ValueError(f"Type `{val_node.type.kind.name}` is not valid for `let`")
 
@@ -1566,6 +1601,8 @@ class CompCtx:
     def start(self, tree: Tree) -> NodeStmtList:
         assert tree.data == "start", tree.data
         result = NodeStmtList(self.current_scope.lookup_type("unit", shallow=True))
+        if self.module.name != "magics":
+            result.add(self.make_from_import_node("magics", wildcard=True))
         for child in tree.children:
             node = self.statement(child, self.get_unit_type())
             result.add(node)
@@ -1610,32 +1647,10 @@ class ModuleGraph:
         self._next_id = 0 # TODO: Generate in a smarter way
         self.sym_id_gen = IdGen()
 
-        # TODO: Use a type cache instead of scope hack
-        self.builtin_scope = Scope(self)
+        self.builtin_scope = Scope(self) # TODO: Remove
 
+        # For now, unit is special because it's overused
         unit_type_sym = self.builtin_scope.put_builtin_type(TypeKind.unit)
-
-        self.builtin_scope.put_builtin_type(TypeKind.bool)
-        self.builtin_scope.put_builtin_type(TypeKind.char)
-
-        self.builtin_scope.put_builtin_type(TypeKind.int8)
-        self.builtin_scope.put_builtin_type(TypeKind.uint8)
-        self.builtin_scope.put_builtin_type(TypeKind.int16)
-        self.builtin_scope.put_builtin_type(TypeKind.uint16)
-        self.builtin_scope.put_builtin_type(TypeKind.int32)
-        self.builtin_scope.put_builtin_type(TypeKind.uint32)
-        self.builtin_scope.put_builtin_type(TypeKind.int64)
-        self.builtin_scope.put_builtin_type(TypeKind.uint64)
-
-        self.builtin_scope.put_builtin_type(TypeKind.float32)
-        self.builtin_scope.put_builtin_type(TypeKind.float64)
-
-        self.builtin_scope.put_builtin_type(TypeKind.pointer)
-
-        # TODO
-        self.builtin_scope.put_builtin_type(TypeKind.string)
-        self.builtin_scope.put_builtin_type(TypeKind.array)
-        self.builtin_scope.put_builtin_type(TypeKind.static)
 
         # TODO: hack
         magic_sym = Symbol("-1", "magic")
