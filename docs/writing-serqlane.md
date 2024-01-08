@@ -1,5 +1,5 @@
-# Language Reference
-This page contains the language reference for serqlane. By the end of this page you should have a good understanding of the language and be able to write your own programs.
+# Writing Serqlane
+This page contains information on how to write code in serqlane. By the end of this page, you should have a basic understanding of how to write code in serqlane.
 
 !!! note
     Expect this page to be updated frequently as the language is still in development. 
@@ -13,6 +13,7 @@ Comments are used to add notes to your code. They are ignored by the compiler an
 ``` rust linenums="1"
 // This is a comment
 dbg("This code should still run") // This is also a comment
+// dbg("this line will not run")
 ```
 ```
 DBG: This code should still run
@@ -106,7 +107,7 @@ DBG: This is my parameter!
 Or, if you want to pass in multiple parameters:
 
 ``` rust linenums="1"
-fn multiple_parameters(parameter_one: string, parameter_two: int) {
+fn multiple_parameters(parameter_one: string, parameter_two: int64) {
     dbg(parameter_one)
     dbg(parameter_two)
 }
@@ -376,6 +377,23 @@ Arithmetic operators are used to perform arithmetic operations on values. The fo
 - `/`: Division
 - `%`: Modulo
 
+To use an arithmetic operator, use the operator between two values. For example:
+
+``` rust linenums="1"
+dbg(1 + 2)
+dbg(1 - 2)
+dbg(1 * 2)
+dbg(1 / 2)
+dbg(1 % 2)
+```
+```
+DBG: 3
+DBG: -1
+DBG: 2
+DBG: 0
+DBG: 1
+```
+
 ### Comparison Operators
 Comparison operators are used to compare values. The following comparison operators are supported by serqlane:
 
@@ -386,6 +404,25 @@ Comparison operators are used to compare values. The following comparison operat
 - `<=`: Less than or equal to
 - `>=`: Greater than or equal to
 
+To use a comparison operator, use the operator between two values. For example:
+
+``` rust linenums="1"
+dbg(1 == 2)
+dbg(1 != 2)
+dbg(1 < 2)
+dbg(1 > 2)
+dbg(1 <= 2)
+dbg(1 >= 2)
+```
+```
+DBG: false
+DBG: true
+DBG: true
+DBG: false
+DBG: true
+DBG: false
+```
+
 ### Logical Operators
 Logical operators are used to perform logical operations on values. The following logical operators are supported by serqlane:
 
@@ -393,6 +430,86 @@ Logical operators are used to perform logical operations on values. The followin
 - `or`: Logical or
 - `not`: Logical not
 
+To use a logical operator, use the operator between two values. For example:
+
+``` rust linenums="1"
+let x = 10
+let y = 20
+if x == 10 and y == 20 {
+    dbg("x is 10 and y is 20")
+}
+if x == 10 or y == 20 {
+    dbg("x is 10 or y is 20")
+}
+if not x == 20 {
+    dbg("x is not 20")
+}
+```
+```
+DBG: x is 10 and y is 20
+DBG: x is 10 or y is 20
+DBG: x is not 20
+```
+
 ### Unary Operators
-!!! Need-help-defining
-    The lark file seems to have a mix of potentially wrong definitions
+!!! Not-Implemented
+    Unary operators are not yet implemented. 
+
+## Imports
+Importing is used to include code from other files. To import a file, use the `import` keyword followed by the name of the file you want to import. Then you'll need to use the dot operator to access the code you want to use. For example:
+
+``` rust linenums="1" title="other.sq"
+fn add(x: int64, y: int64) -> int64 {
+    return x + y
+}
+```
+
+``` rust linenums="1" title="main.sq"
+import other
+dbg(other.add(1, 2))
+```
+```
+DBG: 3
+```
+### From Imports
+You can instead import specific functions from a file by using the `from` keyword. This will allow you to use the functions without having to use the dot operator. To import specific functions from a file, add each function contained within `[]` after the `from` keyword. To import all functions from a file, use `*` instead of `[]`. Keep in mind that you can only import functions that are marked as `pub`.
+
+Single function import
+``` rust linenums="1" title="other.sq"
+fn pub add(x: int64, y: int64) -> int64 {
+    return x + y
+}
+
+fn pub subtract(x: int64, y: int64) -> int64 {
+    return x - y
+}
+```
+
+``` rust linenums="1" title="main.sq"
+from other import [add]
+dbg(add(1, 2))
+```
+```
+DBG: 3
+```
+
+Multiple function import
+``` rust linenums="1" title="main.sq"
+from other import [add, subtract]
+dbg(add(1, 2))
+dbg(subtract(1, 2))
+```
+```
+DBG: 3
+DBG: -1
+```
+Or import all functions
+``` rust linenums="1" title="main.sq"
+from other import *
+dbg(add(1, 2))
+dbg(subtract(1, 2))
+```
+```
+DBG: 3
+DBG: -1
+```

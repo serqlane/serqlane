@@ -51,4 +51,4 @@ DBG: Hello World
 ```
 
 ## Next Steps
-Now that you have serqlane installed, you can check out the [language reference](language-reference.md) to learn more about the language.
+Now that you have serqlane installed, you can check out the [Writing Serqlane](writing-serqlane.md) to learn more about the language.

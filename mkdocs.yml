@@ -34,7 +34,7 @@ theme:
 nav:
   - Overview: index.md
   - Introduction: introduction.md
-  - Language Reference: language-reference.md
+  - Writing Serqlane: writing-serqlane.md
 
 markdown_extensions:
   - markdown.extensions.codehilite
