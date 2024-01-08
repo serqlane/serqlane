@@ -1,3 +1,9 @@
+// Defines symbols that cannot be represented in pure serq code
+
+
+
+// Types
+
 @magic pub type int8
 @magic pub type uint8
 @magic pub type int16
@@ -13,3 +19,7 @@
 @magic pub type bool
 
 @magic pub type string
+
+
+
+// Functions
