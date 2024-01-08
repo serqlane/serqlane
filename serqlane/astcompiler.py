@@ -1601,8 +1601,8 @@ class CompCtx:
     def start(self, tree: Tree) -> NodeStmtList:
         assert tree.data == "start", tree.data
         result = NodeStmtList(self.current_scope.lookup_type("unit", shallow=True))
-        if self.module.name != "magics":
-            result.add(self.make_from_import_node("magics", wildcard=True))
+        if self.module.name != MAGIC_MODULE_NAME:
+            result.add(self.make_from_import_node(MAGIC_MODULE_NAME, wildcard=True))
         for child in tree.children:
             node = self.statement(child, self.get_unit_type())
             result.add(node)
