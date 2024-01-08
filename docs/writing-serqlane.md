@@ -377,7 +377,7 @@ Arithmetic operators are used to perform arithmetic operations on values. The fo
 - `/`: Division
 - `%`: Modulo
 
-To use an arithmetic operator, use the operator between two values. For example:
+To use an arithmetic operator, use the operator between two expressions. For example:
 
 ``` rust linenums="1"
 dbg(1 + 2)
@@ -459,7 +459,7 @@ DBG: x is not 20
 Importing is used to include code from other files. To import a file, use the `import` keyword followed by the name of the file you want to import. Then you'll need to use the dot operator to access the code you want to use. For example:
 
 ``` rust linenums="1" title="other.sq"
-fn add(x: int64, y: int64) -> int64 {
+pub fn add(x: int64, y: int64) -> int64 {
     return x + y
 }
 ```
@@ -476,11 +476,11 @@ You can instead import specific functions from a file by using the `from` keywor
 
 Single function import
 ``` rust linenums="1" title="other.sq"
-fn pub add(x: int64, y: int64) -> int64 {
+pub fn add(x: int64, y: int64) -> int64 {
     return x + y
 }
 
-fn pub subtract(x: int64, y: int64) -> int64 {
+pub fn subtract(x: int64, y: int64) -> int64 {
     return x - y
 }
 ```
