@@ -78,7 +78,7 @@ DBG: Goodbye World!
 ```
 
 ## Functions
-Functions are used to group together a set of instructions. They can be called from anywhere in your program. To create a function, use the `fn` keyword followed by the name of the function, a set of parentheses, optional parameters (separated by commas), and a set of curly braces.
+Functions are used to group together a set of instructions. They can be called from anywhere in your program. To create a function, use the `fn` keyword followed by the name of the function and optional parameters (separated by commas).
 
 A function in its simplest form looks like this:  
 
@@ -93,7 +93,7 @@ DBG: This is my function!
 ```
 
 ### Function Parameters
-Functions can take parameters. Parameters are used to pass data into a function. Each paramter is required to have a type. To add parameters to a function, add the name of the parameter followed by a colon and the type of the parameter. Parameters are separated by commas. For example:
+Functions can take parameters. Parameters are used to pass data into a function. Each paramter is required to have a type. To add parameters to a function, add the name of the parameter followed by the type of the parameter. Parameters are separated by commas. For example:
 
 ``` rust linenums="1"
 fn my_function(my_parameter: string) {
@@ -227,7 +227,7 @@ Compound types are types that are made up of other types. The following compound
     - `array`: An array of values. Can be any sequence of values.
 
 ### Structs
-You can create custom types by using the `struct` keyword. A struct is a collection of named values. To create a struct, use the `struct` keyword followed by the name of the struct, a set of curly braces, and a list of fields. Each field is required to have a name and a type. Fields are separated by commas. For example:
+You can create custom types by using the `struct` keyword. A struct is a collection of named values. To create a struct, use the `struct` keyword followed by the name of the struct, and a list of fields. Each field is required to have a name and a type. For example:
 
 ``` rust linenums="1"
 struct Person {
@@ -458,21 +458,36 @@ DBG: x is not 20
 ## Imports
 Importing is used to include code from other files. To import a file, use the `import` keyword followed by the name of the file you want to import. Then you'll need to use the dot operator to access the code you want to use. For example:
 
+!!! note
+    Keep in mind that you can only import something from another file if it is marked as `pub`.
+
 ``` rust linenums="1" title="other.sq"
 pub fn add(x: int64, y: int64) -> int64 {
     return x + y
+}
+
+pub struct Person {
+    name: string,
 }
 ```
 
 ``` rust linenums="1" title="main.sq"
 import other
+
+let mut p = other.Person()
+a.name = "John"
+
 dbg(other.add(1, 2))
+dbg(a.name)
 ```
 ```
 DBG: 3
+DBG: John
 ```
+
+
 ### From Imports
-You can instead import specific functions from a file by using the `from` keyword. This will allow you to use the functions without having to use the dot operator. To import specific functions from a file, add each function contained within `[]` after the `from` keyword. To import all functions from a file, use `*` instead of `[]`. Keep in mind that you can only import functions that are marked as `pub`.
+You can instead import specific functions from a file by using the `from` keyword. This will allow you to use the functions without having to use the dot operator. To import specific functions from a file, add each function contained within `[]` after the `from` keyword. To import all functions from a file, use `*` instead of `[]`. 
 
 Single function import
 ``` rust linenums="1" title="other.sq"

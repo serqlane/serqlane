@@ -8,7 +8,7 @@ If you are using [nix](https://nixos.org/nix/), it is the only prerequisite.
 Activate your shell by running `nix develop` in the root of the repository.
 !!! note
     You may need to enable some experimental features if you have not done so already.  
-    This can be done either by running `nix-shell --experimental-features 'nix-command flakes'` or by adding the following to your nix config:
+    This can be done either by running `nix develop --experimental-features 'nix-command flakes'` or by adding the following to your nix config:
     ```
     experimental-features = ["nix-command" "flakes"];
     ```
