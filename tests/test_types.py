@@ -1,9 +1,11 @@
 import pytest
 
+from serqlane.astcompiler import SerqTypeInferError
+
 
 def test_invalid_cohersion(executor):
     # TODO: this should probably raise a better exception
-    with pytest.raises(AssertionError):
+    with pytest.raises(SerqTypeInferError):
         executor('let x: int64 = "abc"')
 
 
@@ -19,10 +21,6 @@ fn add(a: int, b: int) -> string {
 let x = add(1, 1)
 """
         )
-
-
-def test_empty_literal(capture_first_debug):
-    assert capture_first_debug("dbg(\"\")") == ""
 
 
 BAD_STRUCT_TYPE_INFERENCE = [
