@@ -38,7 +38,7 @@ class SerqTypeInferError(Exception): ... # TODO: Get rid of this
 
 class Node:
     def __init__(self, type: Type) -> None:
-        assert type != None and isinstance(type, Type), type
+        assert type is not None and isinstance(type, Type), type
         self.type = type
 
     def render(self) -> str:
@@ -641,7 +641,7 @@ class Scope:
         self.older_sibling: Optional[Scope] = None # Can actually be represented as a parent, but this is good enough for now
 
     def get_oldest_sibling(self) -> Scope:
-        if self.older_sibling != None:
+        if self.older_sibling is not None:
             return self.older_sibling.get_oldest_sibling()
         return self
     
@@ -649,14 +649,14 @@ class Scope:
         oldest = self.get_oldest_sibling()
         for sym in oldest._imported_syms.get(module, []):
             yield sym
-        if self.parent != None:
+        if self.parent is not None:
             yield from self.parent.iter_module_imports(module) # TODO: Should "stacked" from imports even be allowed?
 
     def iter_imported_modules(self) -> Iterator[Module]:
         oldest = self.get_oldest_sibling()
         for module in oldest._imported_modules:
             yield module
-        if self.parent != None:
+        if self.parent is not None:
             yield from self.parent.iter_imported_modules()
 
     def is_imported(self, module: Module, sym: Symbol) -> bool:
@@ -698,29 +698,29 @@ class Scope:
         # sibling lookup
         # done in place because we do not want to slip through to parent multiple times
         older = self.older_sibling
-        while older != None:
+        while older is not None:
             for sym in older._local_syms:
                 yield sym
-            if older.older_sibling == None:
+            if older.older_sibling is None:
                 break
             older = older.older_sibling
         
         # import lookup
         # happens quite late because local syms are always preferred
         if include_imports:
-            oldest = older if older != None else self
+            oldest = older if older is not None else self
             for mod, syms in oldest._imported_syms.items():
                 yield mod.sym
                 for sym in syms:
                     yield sym
 
         # parent lookup
-        if not shallow and self.parent != None:
+        if not shallow and self.parent is not None:
             yield from self.parent._iter_syms_impl(include_magics=False, include_imports=include_imports)
 
     def iter_syms(self, name: Optional[str] = None, shallow=False, *, include_magics=True, only_public=False, include_imports=False) -> Iterator[Symbol]:
         for sym in self._iter_syms_impl(shallow=shallow, include_magics=include_magics, include_imports=include_imports):
-            if name != None and sym.name != name:
+            if name is not None and sym.name != name:
                 continue
             if only_public and not sym.public:
                 continue
@@ -746,7 +746,7 @@ class Scope:
     def lookup_type(self, name: str, shallow=False) -> Optional[Type]:
         # helper for trivial case of sym.type
         sym = self.lookup(name, shallow=shallow)
-        if sym != None:
+        if sym is not None:
             return sym.type
 
     def inject(self, sym: Symbol):
@@ -889,7 +889,7 @@ class CompCtx:
         module = self.graph.request_module(import_path)
         to_import = []
         if not wildcard:
-            if tree.children[1] != None:
+            if tree.children[1] is not None:
                 for ident_node in tree.children[1].children:
                     ident = ident_node.children[0].value
                     option_node = NodeOptions(self.get_unit_type())
@@ -950,7 +950,7 @@ class CompCtx:
         if_body = self.handle_block(tree.children[1], self.get_unit_type())
 
         else_body = None
-        if tree.children[2] != None:
+        if tree.children[2] is not None:
             else_body = self.handle_block(tree.children[2], self.get_unit_type())
         else:
             # Always inject an empty else case if none is provided
@@ -966,14 +966,14 @@ class CompCtx:
 
         # Assume unit type if nothing is expected, fixed later
         # Have to be very careful with symbols, we do not want to use one that only exists later
-        result = NodeBlockStmt(expected_type if expected_type != None else self.get_unit_type())
+        result = NodeBlockStmt(expected_type if expected_type is not None else self.get_unit_type())
 
         (tree_children, last_child) = (tree.children[0:len(tree.children)-1], tree.children[-1])
         for child in tree_children:
             # All but the last have to be unit typed
             result.add(self.statement(child, self.get_unit_type()))
 
-        if expected_type != None:
+        if expected_type is not None:
             last = self.statement(last_child, expected_type)
             if isinstance(last, NodeOptions):
                 last = last.use_first()
@@ -1078,7 +1078,7 @@ class CompCtx:
             # both literal
             else:
                 # if possible we ask for help from expected_type
-                if expected_type != None and expr_type.types_compatible(expected_type):
+                if expected_type is not None and expr_type.types_compatible(expected_type):
                     lhs = self.expression(tree.children[0], expected_type)
                     if isinstance(lhs, NodeOptions):
                         lhs = lhs.use_first()
@@ -1089,7 +1089,7 @@ class CompCtx:
                     expr_type = lhs.type
 
                 # no expectation, let them infer their own types
-                elif expected_type == None:
+                elif expected_type is None:
                     lhs = self.expression(tree.children[0], self.get_infer_type())
                     if isinstance(lhs, NodeOptions):
                         lhs = lhs.use_first()
@@ -1165,7 +1165,7 @@ class CompCtx:
                             if field.sym.name == rhs:
                                 matching_field_sym = field.sym
                                 break
-                        assert matching_field_sym != None, f"Could not find {rhs} for {lhs.type.sym.render()}"
+                        assert matching_field_sym is not None, f"Could not find {rhs} for {lhs.type.sym.render()}"
 
                         return NodeDotAccess(lhs, matching_field_sym)
                     case TypeKind.module:
@@ -1259,13 +1259,13 @@ class CompCtx:
             type_sym = self.user_type(type_tree)
             f += 1
         
-        val_node_expected_type = type_sym.type if type_sym != None else self.get_infer_type()
+        val_node_expected_type = type_sym.type if type_sym is not None else self.get_infer_type()
         val_node = self.expression(tree.children[f], val_node_expected_type)
         if val_node.type.kind == TypeKind.unit:
             raise ValueError(f"Type `{val_node.type.kind.name}` is not valid for `let`")
 
         resolved_type = None
-        if type_sym != None:
+        if type_sym is not None:
             resolved_type = type_sym.type
             # check types for compatibility
             if not val_node.type.types_compatible(resolved_type):
@@ -1300,7 +1300,7 @@ class CompCtx:
         assert self.handling_deferred_fn_body, "Return outside of a function"
         # TODO: Make sure this passes type checks
         expr = None
-        if tree.children[0] != None:
+        if tree.children[0] is not None:
             expr = self.expression(tree.children[0], self.current_deferred_ret_type)
             if isinstance(expr, NodeOptions):
                 expr = expr.use_first()
@@ -1352,7 +1352,7 @@ class CompCtx:
         sym = self.current_scope.put_type(ident)
 
         fields = []
-        if tree.children[1] != None:
+        if tree.children[1] is not None:
             self.open_scope()
             for field_node in tree.children[1:]:
                 # TODO: Recursion check. Recursion is currently unrestricted and permits infinite recursion
@@ -1420,7 +1420,7 @@ class CompCtx:
         assert tree.data == "fn_definition", tree.data
         assert expected_type.kind == TypeKind.unit
 
-        public = tree.children[0] != None
+        public = tree.children[0] is not None
 
         ident_node = tree.children[1]
         assert ident_node.data == "identifier"
@@ -1432,7 +1432,7 @@ class CompCtx:
         args_node = self.fn_definition_args(tree.children[2], self.get_unit_type())
         ret_type_node = NodeSymbol(self.get_unit_type().sym, self.get_unit_type())
         ret_type = ret_type_node.type
-        if tree.children[3] != None:
+        if tree.children[3] is not None:
             ret_type_node = self.user_type(tree.children[3])
             ret_type = ret_type_node.type # TODO: Fix this nonsense, type should be `type`, not whatever the type evaluates to
 
@@ -1522,8 +1522,8 @@ class CompCtx:
     def fn_call_expr(self, tree: Tree, expected_type: Type) -> NodeFnCall:
         assert tree.data == "fn_call_expr", tree.data
         callee_node = self.expression(tree.children[0], None)
-        call = self.resolve_call(callee_node, tree.children[1].children if tree.children[1].children[0] != None else [])
-        if call == None:
+        call = self.resolve_call(callee_node, tree.children[1].children if tree.children[1].children[0] is not None else [])
+        if call is None:
             raise ValueError(f"No matching overload found for {tree.children[0].children[0].children[0]}")
         return call
 
@@ -1569,7 +1569,7 @@ class CompCtx:
         for child in tree.children:
             node = self.statement(child, self.get_unit_type())
             result.add(node)
-        if self.current_scope.parent != None:
+        if self.current_scope.parent is not None:
             raise SerqInternalError("Ended on a scope that isn't top level")
         return result
 
