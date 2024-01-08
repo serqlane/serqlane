@@ -293,7 +293,10 @@ class NodeStructDefinition(Node):
 
     def render(self) -> str:
         field_strs = "\n".join(["  " + x.render() for x in self.fields])
-        return f"struct {self.sym.render()} {{\n{field_strs}\n}}"
+        body_str = "{}" if len(field_strs) == 0 else f"{{\n{field_strs}\n}}"
+        magic_str = "@magic " if self.sym.magic else ""
+        pub_str = "pub " if self.sym.public else ""
+        return f"{magic_str}{pub_str}struct {self.sym.render()} {body_str}"
 
 class NodeFnParameters(Node):
     def __init__(self, args: list[tuple[NodeSymbol, Node]]):
@@ -351,16 +354,6 @@ class NodeFromImport(Node):
         else:
             names = ", ".join([x.render() for x in self.to_import])
             return f"from {self.module_sym.render()} import [{names}]"
-
-class NodeTypeStmt(Node):
-    def __init__(self, sym: Symbol, type: Type):
-        super().__init__(type)
-        self.sym = sym
-    
-    def render(self) -> str:
-        magic_str = "@magic\n" if self.sym.magic else ""
-        pub_str = "pub " if self.sym.public else ""
-        return f"{magic_str}{pub_str}type {self.sym.render}"
 
 
 # TODO: Use these, will make later analysis easier
@@ -895,21 +888,8 @@ class CompCtx:
                 return self.handle_from_import(child, wildcard=True)
             case "import_from_stmt":
                 return self.handle_from_import(child, wildcard=False)
-            case "type_stmt":
-                return self.type_stmt(child)
             case _:
                 raise SerqInternalError(f"Unimplemented statement type: {child.data}")
-
-    def type_stmt(self, tree: Tree) -> NodeTypeStmt:
-        decorator = tree.children[0].children[0].children[0].value if tree.children[0] != None else ""
-        public = tree.children[1] != None
-        ident = tree.children[2].children[0].value
-        if decorator == "magic":
-            sym = self.current_scope.get_oldest_sibling().put_builtin_type(TypeKind[ident])
-            sym.public = public
-            return NodeTypeStmt(sym, self.get_unit_type())
-        else:
-            raise NotImplementedError("Non-magic types aren't supported until struct syntax is removed")
 
     def make_from_import_node(self, import_path: str, names = [], *, wildcard: bool) -> NodeFromImport:
         module = self.graph.request_module(import_path)
@@ -1383,18 +1363,31 @@ class CompCtx:
     def struct_definition(self, tree: Tree, expected_type: Type) -> NodeStructDefinition:
         assert tree.data == "struct_definition", tree.data
         assert expected_type.kind == TypeKind.unit
-        ident = tree.children[0].children[0].value
-        sym = self.current_scope.put_type(ident)
+
+        decorator = tree.children[0].children[0].children[0].value if tree.children[0] != None else ""
+        public = tree.children[1] != None
+
+        ident = tree.children[2].children[0].value
+        sym = None
+        if decorator == "magic":
+            sym = self.current_scope.get_oldest_sibling().put_builtin_type(TypeKind[ident])
+        elif decorator == "":
+            sym = self.current_scope.get_oldest_sibling().put_type(ident)
+        else:
+            raise NotImplementedError("Non-magic struct decorators aren't supported for now")
+        sym.public = public
 
         fields = []
-        if tree.children[1] != None:
+        if tree.children[3] != None:
             self.open_scope()
-            for field_node in tree.children[1:]:
+            for field_node in tree.children[3:]:
                 # TODO: Recursion check. Recursion is currently unrestricted and permits infinite recursion
                 #   For proper recursion handling we also gotta ensure we don't try to access a type that is currently being processed like will be the case with mutual recursion
                 field = self.struct_field(field_node, self.get_unit_type())
                 fields.append(field)
             self.close_scope()
+        if decorator == "magic" and len(fields) != 0:
+            raise ValueError("Tried declaring a magic type with fields")
 
         def_node = NodeStructDefinition(sym, fields, self.get_unit_type())
         sym.definition_node = def_node

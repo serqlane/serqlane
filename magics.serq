@@ -4,21 +4,21 @@
 
 // Types
 
-@magic pub type int8
-@magic pub type uint8
-@magic pub type int16
-@magic pub type uint16
-@magic pub type int32
-@magic pub type uint32
-@magic pub type int64
-@magic pub type uint64
+@magic pub struct int8 {}
+@magic pub struct uint8 {}
+@magic pub struct int16 {}
+@magic pub struct uint16 {}
+@magic pub struct int32 {}
+@magic pub struct uint32 {}
+@magic pub struct int64 {}
+@magic pub struct uint64 {}
 
-@magic pub type float32
-@magic pub type float64
+@magic pub struct float32 {}
+@magic pub struct float64 {}
 
-@magic pub type bool
+@magic pub struct bool {}
 
-@magic pub type string
+@magic pub struct string {}
 
 
 
