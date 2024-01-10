@@ -5,3 +5,4 @@ serqlane/vm.py @StarrFox
 tests/* @StarrFox
 flake.nix @StarrFox
 flake.lock @StarrFox
+docs/* @SolarWolf-Code
