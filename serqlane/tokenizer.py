@@ -185,8 +185,13 @@ class Tokenizer:
         message += location_str
         raise TokenizerError(message)
 
+    def put_newline(self, result: list[Token]):
+        if len(result) == 0 or result[-1].kind == TokenKind.NEWLINE:
+            return
+        result.append(self.make_token(TokenKind.NEWLINE, "\n"))
+
     def run(self) -> list[Token]:
-        result = []
+        result: list[Token] = []
 
         while True:
             c = self.peek(0)
@@ -227,15 +232,16 @@ class Tokenizer:
                         self.make_token(TokenKind.ERROR, lit)
                     )
                 result.append(self.make_token(TokenKind.STRING, lit, value=lit[1:-1]))
+            elif c.isspace():
+                # space; advance keeps track of line and column already
+                if c == "\n":
+                    self.put_newline(result)
+                self.advance()
             elif c.isalpha():
                 # identifier or keyword
                 ident = self.take_while(lambda x: x.isalnum() or x == "_")
                 kind = TokenKind(ident) if ident in TokenKind else TokenKind.IDENTIFIER
                 result.append(self.make_token(kind, ident))
-            elif c.isspace():
-                # space; advance keeps track of line and column already
-                if c == "\n":
-                    result.append(self.make_token(TokenKind.NEWLINE, c))
             else:
                 # symbol or comment
                 if c == "/" and self.peek(1) == "/":
@@ -258,19 +264,21 @@ class Tokenizer:
                     if full not in TokenKind:
                         self.report_error(f"Unrecognized symbol: '{full}'", self.make_token(TokenKind.ERROR, full))
                     result.append(self.make_token(TokenKind(full), full))
+                    self.advance()
 
-            self.advance()
             if self.remaining() <= 0:
                 break
 
+        if result[-1].kind == TokenKind.NEWLINE:
+            result.pop()
         return result
 
 
 if __name__ == "__main__":
     code = """
 let x = 2.1
+let y = 1
 """
-    p = pathlib.Path("test.serq")
-    tokenizer = Tokenizer(p.read_text(), filepath=p)
+    tokenizer = Tokenizer(code)
     toks = tokenizer.run()
     print([x.render() for x in toks])
