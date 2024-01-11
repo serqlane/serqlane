@@ -3,18 +3,36 @@ from typing import Any
 import pytest
 
 from serqlane.vm import SerqVM
-from serqlane.astcompiler import ModuleGraph
+from serqlane.astcompiler import ModuleGraph, Module
 
 
 type ModuleMap = dict[str, str]
 
 
+# TODO: multi-module version
 @pytest.fixture
-def executor() -> Callable[[str], SerqVM]:
-    def execute(code: str, *, debug_hook = None):
+def serq_module() -> Callable[[str], Module]:
+    def execute(code: str):
         graph = ModuleGraph()
+        return graph.load("<string>", code)
+    
+    return execute
+
+
+@pytest.fixture
+def renderer(serq_module) -> Callable[[str], str]:
+    def execute(code: str):
+        # TODO: don't do this removeprefix
+        return serq_module(code).ast.render().removeprefix("from magics import *\n")
+
+    return execute
+
+
+@pytest.fixture
+def executor(serq_module) -> Callable[[str], SerqVM]:
+    def execute(code: str, *, debug_hook = None):
+        module = serq_module(code)
         vm = SerqVM(debug_hook=debug_hook)
-        module = graph.load("<string>", code)
         vm.execute_module(module)
         return vm
 
@@ -87,4 +105,6 @@ def multimodule_capture_first_debug(multimodule_executor) -> Callable[[ModuleMap
         return captured
 
     return execute_and_capture
+
+
 
