@@ -190,7 +190,7 @@ class Tokenizer:
             return
         result.append(self.make_token(TokenKind.NEWLINE, "\n"))
 
-    def run(self) -> list[Token]:
+    def process(self) -> list[Token]:
         result: list[Token] = []
 
         while True:
@@ -272,13 +272,3 @@ class Tokenizer:
         if result[-1].kind == TokenKind.NEWLINE:
             result.pop()
         return result
-
-
-if __name__ == "__main__":
-    code = """
-let x = 2.1
-let y = 1
-"""
-    tokenizer = Tokenizer(code)
-    toks = tokenizer.run()
-    print([x.render() for x in toks])
