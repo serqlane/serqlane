@@ -9,12 +9,22 @@ from serqlane.astcompiler import ModuleGraph, Module
 type ModuleMap = dict[str, str]
 
 
+@pytest.fixture(scope="session")
+def module_graph() -> ModuleGraph:
+    graph = ModuleGraph()
+    graph.request_module("magics")
+    return graph
+
+def clear_graph(graph: ModuleGraph):
+    graph.modules = {"magics": graph.modules["magics"]}
+
+
 # TODO: multi-module version
 @pytest.fixture
-def serq_module() -> Callable[[str], Module]:
+def serq_module(module_graph: ModuleGraph) -> Callable[[str], Module]:
     def execute(code: str):
-        graph = ModuleGraph()
-        return graph.load("<string>", code)
+        clear_graph(module_graph)
+        return module_graph.load("<string>", code)
     
     return execute
 
@@ -40,9 +50,9 @@ def executor(serq_module) -> Callable[[str], SerqVM]:
 
 
 @pytest.fixture
-def multimodule_executor() -> Callable[[ModuleMap], SerqVM]:
+def multimodule_executor(module_graph: ModuleGraph) -> Callable[[ModuleMap], SerqVM]:
     def execute(modules: ModuleMap, *, debug_hook = None):
-        graph = ModuleGraph()
+        clear_graph(module_graph)
         vm = SerqVM(debug_hook=debug_hook)
 
         other_modules = []
@@ -50,9 +60,9 @@ def multimodule_executor() -> Callable[[ModuleMap], SerqVM]:
             if other_module_name == "main":
                 continue
 
-            other_modules.append(graph.load(other_module_name, other_module_code))
+            other_modules.append(module_graph.load(other_module_name, other_module_code))
 
-        main_module = graph.load("main", file_contents=modules["main"])
+        main_module = module_graph.load("main", file_contents=modules["main"])
         vm.execute_module(main_module)
         return vm
     
