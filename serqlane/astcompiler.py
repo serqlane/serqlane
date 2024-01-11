@@ -10,6 +10,7 @@ import textwrap
 from lark import Token, Tree
 
 from serqlane.parser import SerqParser
+from serqlane.common import SerqInternalError
 
 
 DEBUG = False
@@ -34,7 +35,6 @@ RESERVED_KEYWORDS = [
 ]
 
 
-class SerqInternalError(Exception): ...
 class SerqTypeInferError(Exception): ... # TODO: Get rid of this
 
 
