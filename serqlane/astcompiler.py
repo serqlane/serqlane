@@ -1067,6 +1067,12 @@ class CompCtx:
             if isinstance(rhs, NodeOptions):
                 rhs = rhs.use_first()
 
+            lhs_lit = isinstance(lhs, NodeLiteral)
+            rhs_lit = isinstance(rhs, NodeLiteral)
+            both_lit = lhs_lit and rhs_lit
+            if both_lit and type(lhs_lit) != type(rhs_lit):
+                raise ValueError("Incompatible literal node types")
+
             # TODO: Dot expr
             if not lhs.type.types_compatible(rhs.type):
                 # TODO: Error reporting
@@ -1121,45 +1127,77 @@ class CompCtx:
         match op:
             case "plus":
                 assert expr_type.kind in arith_types
+                if both_lit:
+                    return type(lhs)(lhs.value + rhs.value, type=lhs.type)
                 return NodePlusExpr(lhs, rhs, type=expr_type)
             case "minus":
                 assert expr_type.kind in arith_types
+                if both_lit:
+                    return type(lhs)(lhs.value - rhs.value, type=lhs.type)
                 return NodeMinusExpression(lhs, rhs, type=expr_type)
             case "star":
                 assert expr_type.kind in arith_types
+                if both_lit:
+                    return type(lhs)(lhs.value * rhs.value, type=lhs.type)
                 return NodeMulExpression(lhs, rhs, type=expr_type)
             case "slash":
                 assert expr_type.kind in arith_types
+                if both_lit:
+                    return type(lhs)(lhs.value / rhs.value, type=lhs.type)
                 return NodeDivExpression(lhs, rhs, type=expr_type)
             
             case "modulus":
                 assert expr_type.kind in int_types
+                if both_lit:
+                    return type(lhs)(lhs.value % rhs.value, type=lhs.type)
                 return NodeModExpression(lhs, rhs, type=expr_type)
             
             case "and":
                 assert expr_type.kind in logical_types
+                if both_lit:
+                    if lhs.type.kind in arith_types:
+                        return type(lhs)(lhs.value & rhs.value, type=lhs.type)
+                    else:
+                        return NodeBoolLit(lhs.value and rhs.value, type=expr_type)
                 return NodeAndExpression(lhs, rhs, type=expr_type)
             case "or":
                 assert expr_type.kind in logical_types
+                if both_lit:
+                    if lhs.type.kind in arith_types:
+                        return type(lhs)(lhs.value | rhs.value, type=lhs.type)
+                    else:
+                        return NodeBoolLit(lhs.value or rhs.value, type=expr_type)
                 return NodeOrExpression(lhs, rhs, type=expr_type)
             
             # TODO: Is this version of ensure_types correct here?
             case "equals":
+                if both_lit:
+                    return NodeBoolLit(lhs.value == rhs.value, type=self.current_scope.lookup_type("bool"))
                 return NodeEqualsExpression(lhs, rhs, type=self.current_scope.lookup_type("bool"))
             case "not_equals":
+                if both_lit:
+                    return NodeBoolLit(lhs.value != rhs.value, type=self.current_scope.lookup_type("bool"))
                 return NodeNotEqualsExpression(lhs, rhs, type=self.current_scope.lookup_type("bool"))
             case "less":
                 # TODO: Ordinal types.
                 assert expr_type.kind in arith_types
+                if both_lit:
+                    return NodeBoolLit(lhs.value < rhs.value, type=self.current_scope.lookup_type("bool"))
                 return NodeLessExpression(lhs, rhs, type=self.current_scope.lookup_type("bool"))
             case "lesseq":
                 assert expr_type.kind in arith_types
+                if both_lit:
+                    return NodeBoolLit(lhs.value <= rhs.value, type=self.current_scope.lookup_type("bool"))
                 return NodeLessEqualsExpression(lhs, rhs, type=self.current_scope.lookup_type("bool"))
             case "greater":
                 assert expr_type.kind in arith_types
+                if both_lit:
+                    return NodeBoolLit(lhs.value > rhs.value, type=self.current_scope.lookup_type("bool"))
                 return NodeGreaterExpression(lhs, rhs, type=self.current_scope.lookup_type("bool"))
             case "greatereq":
                 assert expr_type.kind in arith_types
+                if both_lit:
+                    return NodeBoolLit(lhs.value >= rhs.value, type=self.current_scope.lookup_type("bool"))
                 return NodeGreaterEqualsExpression(lhs, rhs, type=self.current_scope.lookup_type("bool"))
 
             case "dot":
