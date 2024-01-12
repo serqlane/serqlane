@@ -371,6 +371,7 @@ class SerqParser:
                     ident_list.add(ident)
                     if self.peek(0).kind != SqTokenKind.COMMA:
                         break
+                    self.advance()
                 node = Tree("import_from_stmt", children=[module_ident, ident_list])
             else:
                 node = Tree("import_from_stmt", children=[module_ident, None])
