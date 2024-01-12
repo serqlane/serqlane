@@ -104,10 +104,23 @@ class SerqParser:
             SqTokenKind.MINUS,
             SqTokenKind.STAR,
             SqTokenKind.SLASH,
-            SqTokenKind.MODULUS
+            SqTokenKind.MODULUS,
+
+            SqTokenKind.EQUALS,
+            SqTokenKind.NOT_EQUALS,
+            SqTokenKind.GREATER,
+            SqTokenKind.GREATEREQ,
+            SqTokenKind.LESS,
+            SqTokenKind.LESSEQ,
+
+            SqTokenKind.AND,
+            SqTokenKind.OR,
         ])
         match op.kind:
-            case SqTokenKind.PLUS | SqTokenKind.MINUS | SqTokenKind.STAR | SqTokenKind.SLASH | SqTokenKind.MODULUS:
+            case SqTokenKind.PLUS | SqTokenKind.MINUS | SqTokenKind.STAR | SqTokenKind.SLASH | SqTokenKind.MODULUS \
+                | SqTokenKind.EQUALS | SqTokenKind.NOT_EQUALS \
+                | SqTokenKind.GREATER | SqTokenKind.GREATEREQ | SqTokenKind.LESS | SqTokenKind.LESSEQ \
+                | SqTokenKind.AND | SqTokenKind.OR:
                 return Token(op.kind.name.lower(), op.kind.value)
             case _:
                 raise NotImplementedError(op.kind)
@@ -165,8 +178,24 @@ class SerqParser:
             expr = self._wrap_expr(Tree("binary_expression", children=[expr, op, rhs])) 
         return expr
 
+    def _descend_cmp_expr(self) -> Tree:
+        expr = self._descend_plus_expr()
+        while self.peek(0).kind in [SqTokenKind.EQUALS, SqTokenKind.NOT_EQUALS, SqTokenKind.GREATER, SqTokenKind.GREATEREQ, SqTokenKind.LESS, SqTokenKind.LESSEQ]:
+            op = self._eat_operator()
+            rhs = self._descend_plus_expr()
+            expr = self._wrap_expr(Tree("binary_expression", children=[expr, op, rhs]))
+        return expr
+    
+    def _descend_and_expr(self) -> Tree:
+        expr = self._descend_cmp_expr()
+        while self.peek(0).kind in [SqTokenKind.AND, SqTokenKind.OR]:
+            op = self._eat_operator()
+            rhs = self._descend_cmp_expr()
+            expr = self._wrap_expr(Tree("binary_expression", children=[expr, op, rhs]))
+        return expr
+
     def _descend_binary_expr(self) -> Tree:
-        return self._descend_plus_expr()
+        return self._descend_and_expr()
 
     def _eat_expression(self) -> Tree:
         return self._descend_binary_expr()
