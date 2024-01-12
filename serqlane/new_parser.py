@@ -133,7 +133,8 @@ class SerqParser:
             SqTokenKind.TRUE,
             SqTokenKind.FALSE,
             SqTokenKind.IDENTIFIER,
-            SqTokenKind.OPEN_PAREN
+            SqTokenKind.OPEN_PAREN,
+            SqTokenKind.OPEN_CURLY,
         ])
 
         res: Optional[Tree] = None
@@ -152,6 +153,9 @@ class SerqParser:
             case SqTokenKind.OPEN_PAREN:
                 res = Tree("grouped_expression", children=[self._eat_expression()])
                 self.expect([SqTokenKind.CLOSE_PAREN])
+            case SqTokenKind.OPEN_CURLY:
+                res = Tree("block_expression", children=self._handle_stmt_list([SqTokenKind.CLOSE_CURLY]))
+                self.expect([SqTokenKind.CLOSE_CURLY])
             case _:
                 raise NotImplementedError(x.kind)
         if res == None:
@@ -264,20 +268,31 @@ class SerqParser:
                 result.add(self._eat_let())
             case _:
                 expr = self._eat_expression()
+                if expr == None:
+                    raise NotImplementedError(tok.kind)
 
                 if self.peek(0).kind == SqTokenKind.EQ:
                     self.advance()
                     rhs = self._eat_expression()
                     result.add(Tree("assignment", children=[expr, rhs]))
-                if expr == None:
-                    raise NotImplementedError(tok.kind)
-                result.add(expr)
+                else:
+                    result.add(expr)
         if len(result.children) == 0:
             raise SerqInternalError()
         return result
+    
+    def _handle_stmt_list(self, until: list[SqTokenKind]) -> list[Tree]:
+        result: list[Tree] = []
+        tok = self.peek(0)
+        while tok.kind != SqTokenKind.EOF and tok.kind not in until:
+            stmt = self._eat_statement()
+            if stmt != None:
+                result.append(stmt)
+            tok = self.peek(0)
+        return result
 
     def parse(self) -> Tree:
-        result = Tree("start")
+        result = Tree("start", children=self._handle_stmt_list([]))
         tok = self.peek(0)
         while tok.kind != SqTokenKind.EOF:
             stmt = self._eat_statement()
