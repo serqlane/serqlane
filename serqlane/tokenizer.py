@@ -57,6 +57,7 @@ class SqTokenKind(Enum):
 
     WHILE = "while"
     IF = "if"
+    ELSE = "else"
 
     BREAK = "break"
     CONTINUE = "continue"

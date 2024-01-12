@@ -126,9 +126,9 @@ class SerqParser:
         while self.peek(0).kind != SqTokenKind.CLOSE_PAREN:
             arg = self._eat_expression()
             result.add(arg)
-            sep = self.expect([SqTokenKind.COMMA, SqTokenKind.CLOSE_PAREN])
-            if sep.kind == SqTokenKind.CLOSE_PAREN:
+            if self.peek(0) != SqTokenKind.COMMA:
                 break
+        self.expect([SqTokenKind.CLOSE_PAREN])
         if len(result.children) == 0:
             result.add(None)
         return result
@@ -282,9 +282,10 @@ class SerqParser:
             ident = self._eat_identifier()
             typ = self._eat_user_type()
             result.add(Tree("fn_definition_arg", children=[ident, typ]))
-            sep = self.expect([SqTokenKind.COMMA, SqTokenKind.CLOSE_PAREN])
-            if sep.kind == SqTokenKind.CLOSE_PAREN:
+            if self.peek(0).kind != SqTokenKind.COMMA:
                 break
+            self.advance()
+        self.expect([SqTokenKind.CLOSE_PAREN])
         return result
     
     def _eat_function_definition(self) -> Tree:
@@ -320,6 +321,19 @@ class SerqParser:
         result.add(self._eat_identifier())
         return result
     
+    def _eat_if_stmt(self) -> Tree:
+        self.expect([SqTokenKind.IF])
+        result = Tree("if_stmt")
+        cond = self._eat_expression()
+        result.add(cond)
+        result.add(self._handle_block(include_open=True))
+        if self.peek(0).kind == SqTokenKind.ELSE:
+            self.advance()
+            result.add(self._handle_block(include_open=True))
+        else:
+            result.add(None)
+        return result
+
     def _eat_statement(self) -> Optional[Tree]:
         tok = self.peek(0)
         result = Tree("statement")
@@ -353,11 +367,14 @@ class SerqParser:
                 self.advance()
                 prev_skip = self._skip_newlines
                 self._skip_newlines = False
-                if self.peek(0).kind == SqTokenKind.NEWLINE:
+                peek_tok = self.peek(0)
+                self._skip_newlines = prev_skip
+                if peek_tok.kind == SqTokenKind.NEWLINE:
                     result.add(Tree("return_stmt", children=[None]))
                 else:
                     result.add(Tree("return_stmt", children=[self._eat_expression()]))
-                self._skip_newlines = prev_skip
+            case SqTokenKind.IF:
+                result.add(self._eat_if_stmt())
             case _:
                 expr = self._eat_expression()
                 if expr == None:
