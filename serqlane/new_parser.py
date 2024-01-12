@@ -42,17 +42,48 @@ class SerqParser:
         
         self._cur_decorator: Optional[Tree] = None
         self._cur_pub: Optional[Tree] = None
+        
+        self._skip_newlines = True
+        self._stored_newlines = 0
 
     def peek(self, offset=1) -> SqToken:
-        diff = offset + 1 - len(self._token_queue)
+        diff = offset + 1 - len(self._token_queue) + self._stored_newlines
         while diff > 0:
-            self._token_queue.append(self._token_iter.__next__())
-            diff -= 1
-        return self._token_queue[offset]
+            tok = self._token_iter.__next__()
+            self._token_queue.append(tok)
+            if tok.kind == SqTokenKind.NEWLINE:
+                self._stored_newlines += 1
+            else:
+                diff -= 1
+        if self._skip_newlines:
+            i = 0
+            ctr = -1
+            tok: Optional[SqToken] = None
+            while ctr != offset:
+                tok = self._token_queue[i]
+                i += 1
+                if tok.kind != SqTokenKind.NEWLINE or not self._skip_newlines:
+                    ctr += 1
+            if tok == None:
+                raise SerqInternalError()
+            return tok
+        else:
+            return self._token_queue[offset]
 
     def advance(self) -> SqToken:
+        should_skip = self._skip_newlines
+        self._skip_newlines = False
         tok = self.peek(0)
+        if should_skip:
+            while tok.kind == SqTokenKind.NEWLINE:
+                self._token_queue = self._token_queue[1:]
+                self._stored_newlines -= 1
+                tok = self.peek(0)
+        else:
+            if tok.kind == SqTokenKind.NEWLINE:
+                self._stored_newlines -= 1
         self._token_queue = self._token_queue[1:]
+        self._skip_newlines = should_skip
         return tok
 
     def expect(self, kinds: list[SqTokenKind]) -> SqToken:
@@ -83,6 +114,10 @@ class SerqParser:
     def _eat_user_type(self) -> Tree:
         self.expect([SqTokenKind.COLON])
         return Tree("user_type", children=[self._eat_identifier()])
+
+    def _eat_return_user_type(self) -> Tree:
+        self.expect([SqTokenKind.ARROW])
+        return Tree("return_user_type", children=[self._eat_identifier()])
 
     def _eat_function_args(self) -> Tree:
         result = Tree("fn_call_args")
@@ -125,6 +160,13 @@ class SerqParser:
             case _:
                 raise NotImplementedError(op.kind)
 
+    def _handle_block(self, *, include_open: bool) -> Tree:
+        if include_open:
+            self.expect([SqTokenKind.OPEN_CURLY])
+        res = Tree("block_expression", children=self._handle_stmt_list([SqTokenKind.CLOSE_CURLY]))
+        self.expect([SqTokenKind.CLOSE_CURLY])
+        return res
+
     def _descend_atom_expr(self) -> Tree:
         x = self.expect([
             SqTokenKind.INTEGER,
@@ -154,8 +196,7 @@ class SerqParser:
                 res = Tree("grouped_expression", children=[self._eat_expression()])
                 self.expect([SqTokenKind.CLOSE_PAREN])
             case SqTokenKind.OPEN_CURLY:
-                res = Tree("block_expression", children=self._handle_stmt_list([SqTokenKind.CLOSE_CURLY]))
-                self.expect([SqTokenKind.CLOSE_CURLY])
+                res = self._handle_block(include_open=False)
             case _:
                 raise NotImplementedError(x.kind)
         if res == None:
@@ -234,6 +275,30 @@ class SerqParser:
         res.add(self._eat_expression())
         return res
     
+    def _eat_function_definition_args(self) -> Tree:
+        self.expect([SqTokenKind.OPEN_PAREN])
+        result = Tree("fn_definition_args")
+        while self.peek(0).kind != SqTokenKind.CLOSE_PAREN:
+            ident = self._eat_identifier()
+            typ = self._eat_user_type()
+            result.add(Tree("fn_definition_arg", children=[ident, typ]))
+            sep = self.expect([SqTokenKind.COMMA, SqTokenKind.CLOSE_PAREN])
+            if sep.kind == SqTokenKind.CLOSE_PAREN:
+                break
+        return result
+    
+    def _eat_function_definition(self) -> Tree:
+        self.expect([SqTokenKind.FN])
+        result = Tree("fn_definition", children=[self._cur_pub])
+        result.add(self._eat_identifier())
+        result.add(self._eat_function_definition_args())
+        ret_type = None
+        if self.peek(0).kind == SqTokenKind.ARROW:
+            ret_type = self._eat_return_user_type()
+        result.add(ret_type)
+        result.add(self._handle_block(include_open=True))
+        return result
+
     def _eat_struct(self) -> Tree:
         self.expect([SqTokenKind.STRUCT])
         result = Tree("struct_definition", children=[self._cur_decorator, self._cur_pub])
@@ -258,6 +323,12 @@ class SerqParser:
     def _eat_statement(self) -> Optional[Tree]:
         tok = self.peek(0)
         result = Tree("statement")
+
+        if self._cur_decorator != None and tok.kind not in [SqTokenKind.FN, SqTokenKind.STRUCT, SqTokenKind.PUB]:
+            raise ParserError(f"Invalid token for decorator: {tok}")
+        if self._cur_pub != None and tok.kind not in [SqTokenKind.FN, SqTokenKind.STRUCT]:
+            raise ParserError(f"Invalid token for pub")
+
         match tok.kind:
             case SqTokenKind.AT:
                 self._eat_decorator()
@@ -268,6 +339,8 @@ class SerqParser:
                     raise ParserError("Encountered multiple pub tokens without a consumer")
                 self._cur_pub = Tree("PUB", children=[Token("PUB", "pub")])
                 return None
+            case SqTokenKind.FN:
+                result.add(self._eat_function_definition())
             case SqTokenKind.STRUCT:
                 result.add(self._eat_struct())
             case SqTokenKind.ALIAS:
@@ -276,6 +349,15 @@ class SerqParser:
                 if self._cur_decorator != None:
                     raise ParserError("Decorators aren't allowed for let statements")
                 result.add(self._eat_let())
+            case SqTokenKind.RETURN:
+                self.advance()
+                prev_skip = self._skip_newlines
+                self._skip_newlines = False
+                if self.peek(0).kind == SqTokenKind.NEWLINE:
+                    result.add(Tree("return_stmt", children=[None]))
+                else:
+                    result.add(Tree("return_stmt", children=[self._eat_expression()]))
+                self._skip_newlines = prev_skip
             case _:
                 expr = self._eat_expression()
                 if expr == None:
@@ -310,11 +392,3 @@ class SerqParser:
                 result.add(stmt)
             tok = self.peek(0)
         return result
-
-
-if __name__ == "__main__":
-    t = SerqParser("""
-@decorator
-pub struct int8 {}
-    """).parse()
-    print([x for x in t.children])

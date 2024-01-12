@@ -15,6 +15,7 @@ class TokenizerError(Exception): ...
 class SqTokenKind(Enum):
     ERROR = "<error>"
     EOF = "<eof>"
+    NEWLINE = "<newline>"
 
     # symbols
     PLUS = "+"
@@ -79,7 +80,7 @@ class SqTokenKind(Enum):
         return not self.is_symbolic() and self.name.isalnum()
 
     def is_symbolic(self) -> bool:
-        if self in [SqTokenKind.ERROR, SqTokenKind.EOF]:
+        if self in [SqTokenKind.ERROR, SqTokenKind.EOF, SqTokenKind.NEWLINE]:
             return False
         return not self.value[0].isalnum() and not (self.value.startswith("{") and self.value.endswith("}"))
 
@@ -235,6 +236,14 @@ class Tokenizer:
                 )
             elif c.isspace():
                 # space; advance keeps track of line and column already
+                if c == "\n":
+                    yield SqToken(
+                        kind=SqTokenKind.NEWLINE,
+                        literal=c,
+                        line=self.line,
+                        column_start=self.column - len(c),
+                        column_end=self.column,
+                    )
                 self.advance()
             elif c.isnumeric():
                 # int or float
