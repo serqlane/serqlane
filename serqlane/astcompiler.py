@@ -7,9 +7,9 @@ import pathlib
 import hashlib
 import textwrap
 
-from lark import Token, Tree
-
-from serqlane.parser import SerqParser
+from serqlane.parser import Token, Tree, SerqParser
+#from serqlane.parser import SerqParser
+from serqlane.common import SerqInternalError
 
 
 DEBUG = False
@@ -34,7 +34,6 @@ RESERVED_KEYWORDS = [
 ]
 
 
-class SerqInternalError(Exception): ...
 class SerqTypeInferError(Exception): ... # TODO: Get rid of this
 
 
@@ -763,9 +762,6 @@ class Scope:
         assert type(name) == str
         if checked and self.lookup(name, shallow=shallow): raise ValueError(f"redefinition of {name}")
 
-        if name in RESERVED_KEYWORDS:
-            raise ValueError(f"Cannot use reserved keyword `{name}` as a symbol name")
-
         result = Symbol(self.module_graph.sym_id_gen.next(), name=name)
         self.inject(result)
         return result
@@ -1060,7 +1056,7 @@ class CompCtx:
         if isinstance(lhs, NodeOptions):
             lhs = lhs.use_first()
         # TODO: Can the symbol be captured somehow?
-        op = tree.children[1].data.value
+        op = tree.children[1].data
         # a dot expression does not work by the same type rules
         if op != "dot":
             rhs = self.expression(tree.children[2], None)
@@ -1590,7 +1586,7 @@ class CompCtx:
         callee_node = self.expression(tree.children[0], None)
         call = self.resolve_call(callee_node, tree.children[1].children if tree.children[1].children[0] != None else [])
         if call == None:
-            raise ValueError(f"No matching overload found for {tree.children[0].children[0].children[0]}")
+            raise ValueError(f"No matching overload found for {tree.children[0].children[0].children[0].value}")
         return call
 
     def expression(self, tree: Tree, expected_type: Type) -> Node:
@@ -1650,7 +1646,7 @@ class Module:
         self.global_scope = Scope(graph)
         self.id = id
         self.hash = hashlib.md5(contents.encode()).digest()
-        self.lark_tree = self.graph.serq_parser.parse(contents, display=False)
+        self.mod_tree = SerqParser(raw_data=contents).parse()#self.graph.serq_parser.parse(contents, display=False)
         self.ast: Node = None
         # mapping of (name, dict[params]) -> Type
         self.generic_cache: dict[tuple[str, dict[Symbol, Type]], Type] = {}
@@ -1677,8 +1673,6 @@ class ModuleGraph:
         self.modules: dict[str, Module] = {} # TODO: Detect duplicates based on hash, reduce workload
         self._next_id = 0 # TODO: Generate in a smarter way
         self.sym_id_gen = IdGen()
-
-        self.serq_parser = SerqParser()
 
         self.builtin_scope = Scope(self) # TODO: Remove
 
@@ -1709,7 +1703,7 @@ class ModuleGraph:
         self.modules[name] = mod
         # TODO: Make sure the module isn't already being processed
         ctx = CompCtx(mod, self)
-        ast: NodeStmtList = ctx.start(mod.lark_tree)
+        ast: NodeStmtList = ctx.start(mod.mod_tree)
 
         # TODO: Check type cohesion
         ctx.handling_deferred_fn_body = True
