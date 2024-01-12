@@ -1059,7 +1059,7 @@ class CompCtx:
         if isinstance(lhs, NodeOptions):
             lhs = lhs.use_first()
         # TODO: Can the symbol be captured somehow?
-        op = tree.children[1].data.value
+        op = tree.children[1].data
         # a dot expression does not work by the same type rules
         if op != "dot":
             rhs = self.expression(tree.children[2], None)
@@ -1589,7 +1589,7 @@ class CompCtx:
         callee_node = self.expression(tree.children[0], None)
         call = self.resolve_call(callee_node, tree.children[1].children if tree.children[1].children[0] != None else [])
         if call == None:
-            raise ValueError(f"No matching overload found for {tree.children[0].children[0].children[0]}")
+            raise ValueError(f"No matching overload found for {tree.children[0].children[0].children[0].value}")
         return call
 
     def expression(self, tree: Tree, expected_type: Type) -> Node:

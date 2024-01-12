@@ -14,7 +14,11 @@ class ParserError(Exception): ...
 class Token:
     def __init__(self, type: str, value: str):
         self.type = type
+        self.data = type
         self.value = value
+
+    def __repr__(self) -> str:
+        return f"{self.type}"
 
 class Tree:
     def __init__(self, data: str, *, children: Optional[list[Tree | Token | None]] = None):
@@ -23,6 +27,10 @@ class Tree:
 
     def add(self, x: Tree | Token | None):
         self.children.append(x)
+
+    def __repr__(self) -> str:
+        children = ", ".join([repr(x) for x in self.children])
+        return f"{self.data}: [{children}]"
 
 
 class SerqParser:
@@ -62,17 +70,39 @@ class SerqParser:
     def _make_identifier(self, ident: SqToken) -> Tree:
         return Tree("identifier", children=[Token("identifier", ident.literal)])
 
+    def _wrap_expr(self, expr: Tree | Token) -> Tree:
+        if expr.data == "expression":
+            return expr
+        else:
+            return Tree("expression", children=[expr])
+
     def _eat_identifier(self) -> Tree:
         ident = self.expect([SqTokenKind.IDENTIFIER])
         return self._make_identifier(ident)
+
+    def _eat_function_args(self) -> Tree:
+        result = Tree("fn_call_args")
+        self.expect([SqTokenKind.OPEN_PAREN])
+
+        while self.peek(0).kind != SqTokenKind.CLOSE_PAREN:
+            arg = self._eat_expression()
+            result.add(arg)
+            sep = self.expect([SqTokenKind.COMMA, SqTokenKind.CLOSE_PAREN])
+            if sep.kind == SqTokenKind.CLOSE_PAREN:
+                break
+        if len(result.children) == 0:
+            result.add(None)
+        return result
 
     def _eat_operator(self) -> Token:
         op = self.expect([
             SqTokenKind.PLUS,
             SqTokenKind.MINUS,
+            SqTokenKind.STAR,
+            SqTokenKind.SLASH
         ])
         match op.kind:
-            case SqTokenKind.PLUS | SqTokenKind.MINUS:
+            case SqTokenKind.PLUS | SqTokenKind.MINUS | SqTokenKind.STAR | SqTokenKind.SLASH:
                 return Token(op.kind.name.lower(), op.kind.value)
             case _:
                 raise NotImplementedError(op.kind)
@@ -86,25 +116,47 @@ class SerqParser:
             SqTokenKind.FALSE,
             SqTokenKind.IDENTIFIER,
         ])
+
+        res: Optional[Tree] = None
+
         match x.kind:
             case SqTokenKind.INTEGER | SqTokenKind.DECIMAL | SqTokenKind.STRING:
                 name = x.kind.name.lower()
-                return Tree(name, children=[Token(name, x.literal)])
+                res = Tree(name, children=[Token(name, x.literal)])
             case SqTokenKind.TRUE | SqTokenKind.FALSE:
-                return Tree("bool", children=[Token(x.literal, x.literal)])
+                res = Tree("bool", children=[Token(x.literal, x.literal)])
             case SqTokenKind.IDENTIFIER:
-                return self._make_identifier(x)
+                res = self._make_identifier(x)
             case _:
                 raise NotImplementedError(x.kind)
+        if res == None:
+            raise NotImplementedError()
+        res = self._wrap_expr(res)
+
+        if self.peek(0).kind == SqTokenKind.OPEN_PAREN:
+            args = self._eat_function_args()
+            lhs = res
+            res = Tree("fn_call_expr", children=[lhs, args])
+        return self._wrap_expr(res)
+
+    def _descend_mul_expr(self) -> Tree:
+        lhs = self._descend_atom_expr()
+        op = self.peek(0)
+        if op.kind in [SqTokenKind.STAR, SqTokenKind.SLASH]:
+            op = self._eat_operator()
+            rhs = self._descend_atom_expr()
+            return self._wrap_expr(Tree("binary_expression", children=[lhs, op, rhs]))
+        else:
+            return lhs
 
 
     def _descend_plus_expr(self) -> Tree:
-        lhs = self._descend_atom_expr()
+        lhs = self._descend_mul_expr()
         op = self.peek(0)
         if op.kind in [SqTokenKind.PLUS, SqTokenKind.MINUS]:
             op = self._eat_operator()
-            rhs = self._descend_atom_expr()
-            return Tree("binary_expr", children=[lhs, op, rhs])
+            rhs = self._descend_mul_expr()
+            return self._wrap_expr(Tree("binary_expression", children=[lhs, op, rhs]))
         else:
             return lhs
 
@@ -112,7 +164,7 @@ class SerqParser:
         return self._descend_plus_expr()
 
     def _eat_expression(self) -> Tree:
-        return Tree("expression", children=[self._descend_binary_expr()])
+        return self._descend_binary_expr()
 
 
     def _eat_decorator(self) -> Tree:
@@ -176,8 +228,9 @@ class SerqParser:
                     self.advance()
                     rhs = self._eat_expression()
                     result.add(Tree("assignment", children=[expr, rhs]))
-                else:
+                if expr == None:
                     raise NotImplementedError(tok.kind)
+                result.add(expr)
         if len(result.children) == 0:
             raise SerqInternalError()
         return result
