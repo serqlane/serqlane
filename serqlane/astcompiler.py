@@ -1646,7 +1646,7 @@ class Module:
         self.global_scope = Scope(graph)
         self.id = id
         self.hash = hashlib.md5(contents.encode()).digest()
-        self.lark_tree = SerqParser(raw_data=contents).parse()#self.graph.serq_parser.parse(contents, display=False)
+        self.mod_tree = SerqParser(raw_data=contents).parse()#self.graph.serq_parser.parse(contents, display=False)
         self.ast: Node = None
         # mapping of (name, dict[params]) -> Type
         self.generic_cache: dict[tuple[str, dict[Symbol, Type]], Type] = {}
@@ -1703,7 +1703,7 @@ class ModuleGraph:
         self.modules[name] = mod
         # TODO: Make sure the module isn't already being processed
         ctx = CompCtx(mod, self)
-        ast: NodeStmtList = ctx.start(mod.lark_tree)
+        ast: NodeStmtList = ctx.start(mod.mod_tree)
 
         # TODO: Check type cohesion
         ctx.handling_deferred_fn_body = True
