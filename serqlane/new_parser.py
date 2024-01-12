@@ -12,8 +12,8 @@ class ParserError(Exception): ...
 
 
 class Token:
-    def __init__(self, data: str, value: str):
-        self.data = data
+    def __init__(self, type: str, value: str):
+        self.type = type
         self.value = value
 
 class Tree:
@@ -59,10 +59,12 @@ class SerqParser:
             self.advance()
             t = self.peek(0)
 
+    def _make_identifier(self, ident: SqToken) -> Tree:
+        return Tree("identifier", children=[Token("identifier", ident.literal)])
 
     def _eat_identifier(self) -> Tree:
         ident = self.expect([SqTokenKind.IDENTIFIER])
-        return Tree("identifier", children=[Token("identifier", ident.literal)])
+        return self._make_identifier(ident)
 
     def _eat_operator(self) -> Token:
         op = self.expect([
@@ -82,6 +84,7 @@ class SerqParser:
             SqTokenKind.STRING,
             SqTokenKind.TRUE,
             SqTokenKind.FALSE,
+            SqTokenKind.IDENTIFIER,
         ])
         match x.kind:
             case SqTokenKind.INTEGER | SqTokenKind.DECIMAL | SqTokenKind.STRING:
@@ -89,6 +92,8 @@ class SerqParser:
                 return Tree(name, children=[Token(name, x.literal)])
             case SqTokenKind.TRUE | SqTokenKind.FALSE:
                 return Tree("bool", children=[Token(x.literal, x.literal)])
+            case SqTokenKind.IDENTIFIER:
+                return self._make_identifier(x)
             case _:
                 raise NotImplementedError(x.kind)
 
@@ -165,7 +170,14 @@ class SerqParser:
                     raise ParserError("Decorators aren't allowed for let statements")
                 result.add(self._eat_let())
             case _:
-                raise NotImplementedError(tok.kind)
+                expr = self._eat_expression()
+
+                if self.peek(0).kind == SqTokenKind.EQ:
+                    self.advance()
+                    rhs = self._eat_expression()
+                    result.add(Tree("assignment", children=[expr, rhs]))
+                else:
+                    raise NotImplementedError(tok.kind)
         if len(result.children) == 0:
             raise SerqInternalError()
         return result
