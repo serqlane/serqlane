@@ -140,25 +140,21 @@ class SerqParser:
         return self._wrap_expr(res)
 
     def _descend_mul_expr(self) -> Tree:
-        lhs = self._descend_atom_expr()
-        op = self.peek(0)
-        if op.kind in [SqTokenKind.STAR, SqTokenKind.SLASH]:
+        expr = self._descend_atom_expr()
+        while self.peek(0).kind in [SqTokenKind.STAR, SqTokenKind.SLASH]:
             op = self._eat_operator()
             rhs = self._descend_atom_expr()
-            return self._wrap_expr(Tree("binary_expression", children=[lhs, op, rhs]))
-        else:
-            return lhs
+            expr = self._wrap_expr(Tree("binary_expression", children=[expr, op, rhs]))        
+        return expr
 
 
     def _descend_plus_expr(self) -> Tree:
-        lhs = self._descend_mul_expr()
-        op = self.peek(0)
-        if op.kind in [SqTokenKind.PLUS, SqTokenKind.MINUS]:
+        expr = self._descend_mul_expr()
+        while self.peek(0).kind in [SqTokenKind.PLUS, SqTokenKind.MINUS]:
             op = self._eat_operator()
             rhs = self._descend_mul_expr()
-            return self._wrap_expr(Tree("binary_expression", children=[lhs, op, rhs]))
-        else:
-            return lhs
+            expr = self._wrap_expr(Tree("binary_expression", children=[expr, op, rhs])) 
+        return expr
 
     def _descend_binary_expr(self) -> Tree:
         return self._descend_plus_expr()
