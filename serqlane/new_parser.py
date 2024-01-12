@@ -80,6 +80,10 @@ class SerqParser:
         ident = self.expect([SqTokenKind.IDENTIFIER])
         return self._make_identifier(ident)
 
+    def _eat_user_type(self) -> Tree:
+        self.expect([SqTokenKind.COLON])
+        return Tree("user_type", children=[self._eat_identifier()])
+
     def _eat_function_args(self) -> Tree:
         result = Tree("fn_call_args")
         self.expect([SqTokenKind.OPEN_PAREN])
@@ -99,10 +103,11 @@ class SerqParser:
             SqTokenKind.PLUS,
             SqTokenKind.MINUS,
             SqTokenKind.STAR,
-            SqTokenKind.SLASH
+            SqTokenKind.SLASH,
+            SqTokenKind.MODULUS
         ])
         match op.kind:
-            case SqTokenKind.PLUS | SqTokenKind.MINUS | SqTokenKind.STAR | SqTokenKind.SLASH:
+            case SqTokenKind.PLUS | SqTokenKind.MINUS | SqTokenKind.STAR | SqTokenKind.SLASH | SqTokenKind.MODULUS:
                 return Token(op.kind.name.lower(), op.kind.value)
             case _:
                 raise NotImplementedError(op.kind)
@@ -145,7 +150,7 @@ class SerqParser:
 
     def _descend_mul_expr(self) -> Tree:
         expr = self._descend_atom_expr()
-        while self.peek(0).kind in [SqTokenKind.STAR, SqTokenKind.SLASH]:
+        while self.peek(0).kind in [SqTokenKind.STAR, SqTokenKind.SLASH, SqTokenKind.MODULUS]:
             op = self._eat_operator()
             rhs = self._descend_atom_expr()
             expr = self._wrap_expr(Tree("binary_expression", children=[expr, op, rhs]))        
@@ -185,6 +190,10 @@ class SerqParser:
         if self.peek(0).kind == SqTokenKind.MUT:
             res.add(self._eat_mut())
         res.add(self._eat_identifier())
+
+        if self.peek(0).kind == SqTokenKind.COLON:
+            res.add(self._eat_user_type())
+
         self.expect([SqTokenKind.EQ])
         res.add(self._eat_expression())
         return res
