@@ -151,12 +151,15 @@ class SerqParser:
 
             SqTokenKind.AND,
             SqTokenKind.OR,
+
+            SqTokenKind.DOT,
         ])
         match op.kind:
             case SqTokenKind.PLUS | SqTokenKind.MINUS | SqTokenKind.STAR | SqTokenKind.SLASH | SqTokenKind.MODULUS \
                 | SqTokenKind.EQUALS | SqTokenKind.NOT_EQUALS \
                 | SqTokenKind.GREATER | SqTokenKind.GREATEREQ | SqTokenKind.LESS | SqTokenKind.LESSEQ \
-                | SqTokenKind.AND | SqTokenKind.OR:
+                | SqTokenKind.AND | SqTokenKind.OR \
+                | SqTokenKind.DOT:
                 return Token(op.kind.name.lower(), op.kind.value)
             case _:
                 raise NotImplementedError(op.kind)
@@ -210,11 +213,24 @@ class SerqParser:
             res = Tree("fn_call_expr", children=[lhs, args])
         return self._wrap_expr(res)
 
-    def _descend_mul_expr(self) -> Tree:
+    def _descend_dot_expr(self) -> Tree:
         expr = self._descend_atom_expr()
+        while self.peek(0).kind == SqTokenKind.DOT:
+            op = self._eat_operator()
+            rhs = self._eat_identifier()
+
+            expr = self._wrap_expr(Tree("binary_expression", children=[expr, op, rhs]))
+
+            if self.peek(0).kind == SqTokenKind.OPEN_PAREN:
+                args = self._eat_function_args()
+                expr = self._wrap_expr(Tree("fn_call_expr", children=[expr, args]))
+        return expr
+
+    def _descend_mul_expr(self) -> Tree:
+        expr = self._descend_dot_expr()
         while self.peek(0).kind in [SqTokenKind.STAR, SqTokenKind.SLASH, SqTokenKind.MODULUS]:
             op = self._eat_operator()
-            rhs = self._descend_atom_expr()
+            rhs = self._descend_dot_expr()
             expr = self._wrap_expr(Tree("binary_expression", children=[expr, op, rhs]))        
         return expr
 
@@ -335,6 +351,11 @@ class SerqParser:
         else:
             result.add(None)
         return result
+    
+    def _eat_import(self) -> Tree:
+        self.expect([SqTokenKind.IMPORT])
+        result = Tree("import_stmt", children=[self._eat_identifier()])
+        return result
 
     def _eat_statement(self) -> Optional[Tree]:
         tok = self.peek(0)
@@ -377,6 +398,8 @@ class SerqParser:
                     result.add(Tree("return_stmt", children=[self._eat_expression()]))
             case SqTokenKind.IF:
                 result.add(self._eat_if_stmt())
+            case SqTokenKind.IMPORT:
+                result.add(self._eat_import())
             case _:
                 expr = self._eat_expression()
                 if expr == None:
