@@ -86,18 +86,18 @@ class SqTokenKind(Enum):
             return False
         return not self.value[0].isalnum() and not (self.value.startswith("{") and self.value.endswith("}"))
 
-KEYWORDS = dict(
+KEYWORDS: dict[str, SqTokenKind] = dict(
     (x.value, x) for x in SqTokenKind if x.is_keyword()
 )
 
 # Also contains () and similar
-SINGLECHAR_OPERATORS = dict(
+SINGLECHAR_OPERATORS: dict[str, SqTokenKind] = dict(
     (x.value, x) for x in SqTokenKind if len(x.value) == 1 and x.is_symbolic()
 )
 MULTICHAR_MARKERS = frozenset(
     x.value[0] for x in SqTokenKind if len(x.value) > 1 and x.is_symbolic()
 )
-MULTICHAR_OPERATORS = dict(
+MULTICHAR_OPERATORS: dict[str, SqTokenKind] = dict(
     (x.value, x) for x in SqTokenKind if len(x.value) > 1 and x.is_symbolic()
 )
 for t in SqTokenKind:

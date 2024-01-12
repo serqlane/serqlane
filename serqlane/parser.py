@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pathlib
 
-from typing import Optional, Callable
+from typing import Optional, Sequence
 
 from serqlane.common import SerqInternalError
 from serqlane.tokenizer import Tokenizer, SqTokenKind, SqToken
@@ -101,7 +101,7 @@ class SerqParser:
     def _make_identifier(self, ident: SqToken) -> Tree:
         return Tree("identifier", children=[Token("identifier", ident.literal)])
 
-    def _wrap_expr(self, expr: Tree | Token) -> Tree:
+    def _wrap_expr(self, expr: Tree) -> Tree:
         if expr.data == "expression":
             return expr
         else:
@@ -169,7 +169,10 @@ class SerqParser:
     def _handle_block(self, *, include_open: bool) -> Tree:
         if include_open:
             self.expect([SqTokenKind.OPEN_CURLY])
-        res = Tree("block_expression", children=self._handle_stmt_list([SqTokenKind.CLOSE_CURLY]))
+        res = Tree(
+            "block_expression",
+            children=self._handle_stmt_list([SqTokenKind.CLOSE_CURLY])  # type: ignore (list covariance)
+        )  
         self.expect([SqTokenKind.CLOSE_CURLY])
         return res
 
@@ -489,7 +492,7 @@ class SerqParser:
         return result
 
     def parse(self) -> Tree:
-        result = Tree("start", children=self._handle_stmt_list([]))
+        result = Tree("start", children=self._handle_stmt_list([]))  # type: ignore (list covariance)
         tok = self.peek(0)
         while tok.kind != SqTokenKind.EOF:
             stmt = self._eat_statement()
