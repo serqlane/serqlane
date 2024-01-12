@@ -126,8 +126,9 @@ class SerqParser:
         while self.peek(0).kind != SqTokenKind.CLOSE_PAREN:
             arg = self._eat_expression()
             result.add(arg)
-            if self.peek(0) != SqTokenKind.COMMA:
+            if self.peek(0).kind != SqTokenKind.COMMA:
                 break
+            self.advance()
         self.expect([SqTokenKind.CLOSE_PAREN])
         if len(result.children) == 0:
             result.add(None)
