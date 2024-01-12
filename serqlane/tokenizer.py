@@ -174,7 +174,7 @@ class Tokenizer:
         else:
             self.column += 1
 
-    def peek(self, offset=1) -> str:
+    def peek(self, offset: int = 1) -> str:
         if self.remaining > offset:
             return self.data[self.offset + offset]
         return ""

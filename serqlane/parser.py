@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pathlib
 
-from typing import Optional, Sequence
+from typing import Optional
 
 from serqlane.common import SerqInternalError
 from serqlane.tokenizer import Tokenizer, SqTokenKind, SqToken
@@ -46,7 +46,7 @@ class SerqParser:
         self._skip_newlines = True
         self._stored_newlines = 0
 
-    def peek(self, offset=1) -> SqToken:
+    def peek(self, offset: int = 1) -> SqToken:
         diff = offset + 1 - len(self._token_queue) + self._stored_newlines
         while diff > 0:
             tok = self._token_iter.__next__()
@@ -208,7 +208,7 @@ class SerqParser:
                 res = self._handle_block(include_open=False)
             case _:
                 raise NotImplementedError(x.kind)
-        if res == None:
+        if res is None:  # type: ignore (though this will never run it may run in the future)
             raise NotImplementedError()
         res = self._wrap_expr(res)
 
@@ -341,7 +341,7 @@ class SerqParser:
         result.add(self._eat_identifier())
         self.expect([SqTokenKind.OPEN_CURLY])
         
-        field_list = []
+        field_list: list[Tree] = []
         cursor = self.peek(0)
         while cursor.kind != SqTokenKind.CLOSE_CURLY:
             field_ident = self._eat_identifier()
@@ -468,8 +468,6 @@ class SerqParser:
                 self.advance()
             case _:
                 expr = self._eat_expression()
-                if expr == None:
-                    raise NotImplementedError(tok.kind)
 
                 if self.peek(0).kind == SqTokenKind.EQ:
                     self.advance()
