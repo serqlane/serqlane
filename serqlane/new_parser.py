@@ -292,6 +292,7 @@ class SerqParser:
     def _eat_function_definition(self) -> Tree:
         self.expect([SqTokenKind.FN])
         result = Tree("fn_definition", children=[self._cur_pub])
+        self._cur_pub = None
         result.add(self._eat_identifier())
         result.add(self._eat_function_definition_args())
         ret_type = None
@@ -340,9 +341,9 @@ class SerqParser:
         result = Tree("statement")
 
         if self._cur_decorator != None and tok.kind not in [SqTokenKind.FN, SqTokenKind.STRUCT, SqTokenKind.PUB]:
-            raise ParserError(f"Invalid token for decorator: {tok}")
+            raise ParserError(f"Invalid token for decorator: {tok.kind}")
         if self._cur_pub != None and tok.kind not in [SqTokenKind.FN, SqTokenKind.STRUCT]:
-            raise ParserError(f"Invalid token for pub")
+            raise ParserError(f"Invalid token for pub: {tok.kind}")
 
         match tok.kind:
             case SqTokenKind.AT:
