@@ -180,6 +180,8 @@ class Tokenizer:
         if not pred(c):
             return ""
         result = c
+        if self.remaining <= 0:
+            return result
         self.advance()
         while self.remaining > 0:
             c = self.peek(0)
@@ -280,6 +282,8 @@ class Tokenizer:
                         found_quote = True
                     if x == "\\":
                         escaping = not escaping # handle self escape
+                    else:
+                        escaping = False
                     return True
                 lit = c + self.take_while(pred)
                 if not found_quote:

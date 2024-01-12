@@ -139,9 +139,12 @@ class SerqParser:
         res: Optional[Tree] = None
 
         match x.kind:
-            case SqTokenKind.INTEGER | SqTokenKind.DECIMAL | SqTokenKind.STRING:
+            case SqTokenKind.INTEGER | SqTokenKind.DECIMAL:
                 name = x.kind.name.lower()
                 res = Tree(name, children=[Token(name, x.literal)])
+            case SqTokenKind.STRING:
+                name = x.kind.name.lower()
+                res = Tree(name, children=[Token(name, x.literal[1:-1])])
             case SqTokenKind.TRUE | SqTokenKind.FALSE:
                 res = Tree("bool", children=[Token(x.literal, x.literal)])
             case SqTokenKind.IDENTIFIER:
