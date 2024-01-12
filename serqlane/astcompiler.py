@@ -7,7 +7,7 @@ import pathlib
 import hashlib
 import textwrap
 
-from serqlane.new_parser import Token, Tree, SerqParser
+from serqlane.parser import Token, Tree, SerqParser
 #from serqlane.parser import SerqParser
 from serqlane.common import SerqInternalError
 

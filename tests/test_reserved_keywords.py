@@ -1,6 +1,6 @@
 import pytest
 from serqlane.astcompiler import RESERVED_KEYWORDS
-from serqlane.new_parser import ParserError
+from serqlane.parser import ParserError
 
 @pytest.mark.parametrize("keyword", RESERVED_KEYWORDS)
 def test_let_reserved_keywords(executor, keyword):
