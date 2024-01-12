@@ -337,7 +337,18 @@ class SerqParser:
 
         result.add(self._eat_identifier())
         self.expect([SqTokenKind.OPEN_CURLY])
-        result.add(None) # TODO: Implement fields
+        
+        field_list = []
+        cursor = self.peek(0)
+        while cursor.kind != SqTokenKind.CLOSE_CURLY:
+            field_ident = self._eat_identifier()
+            field_type = self._eat_user_type()
+            field_list.append(Tree("struct_field", children=[field_ident, field_type]))
+            cursor = self.peek(0)
+        if len(field_list) == 0:
+            result.add(None)
+        else:
+            result.children.extend(field_list)
         self.expect([SqTokenKind.CLOSE_CURLY])
 
         return result
