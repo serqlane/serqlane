@@ -382,6 +382,12 @@ class SerqParser:
                 raise NotImplementedError(cursor.kind)
             return Tree("import_all_from_stmt", children=[module_ident])
 
+    def _eat_while_stmt(self) -> Tree:
+        self.expect([SqTokenKind.WHILE])
+        cond = self._eat_expression()
+        body = self._handle_block(include_open=True)
+        return Tree("while_stmt", children=[cond, body])
+
     def _eat_statement(self) -> Optional[Tree]:
         tok = self.peek(0)
         result = Tree("statement")
@@ -427,6 +433,14 @@ class SerqParser:
                 result.add(self._eat_import())
             case SqTokenKind.FROM:
                 result.add(self._eat_from_import())
+            case SqTokenKind.WHILE:
+                result.add(self._eat_while_stmt())
+            case SqTokenKind.BREAK:
+                result.add(Tree("break_stmt"))
+                self.advance()
+            case SqTokenKind.CONTINUE:
+                result.add(Tree("continue_stmt"))
+                self.advance()
             case _:
                 expr = self._eat_expression()
                 if expr == None:
