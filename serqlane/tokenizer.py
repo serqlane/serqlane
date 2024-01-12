@@ -12,9 +12,8 @@ class TokenizerError(Exception): ...
 
 
 
-class TokenKind(Enum):
+class SqTokenKind(Enum):
     ERROR = "<error>"
-    NEWLINE = "<newline>"
     EOF = "<eof>"
 
     # symbols
@@ -65,6 +64,9 @@ class TokenKind(Enum):
     IMPORT = "import"
     FROM = "from"
 
+    STRUCT = "struct"
+    FN = "fn"
+
     # special
     IDENTIFIER = "{identifier}"
     INTEGER = "{integer}"
@@ -76,25 +78,25 @@ class TokenKind(Enum):
         return not self.is_symbolic() and self.name.isalnum()
 
     def is_symbolic(self) -> bool:
-        if self in [TokenKind.ERROR, TokenKind.NEWLINE, TokenKind.EOF]:
+        if self in [SqTokenKind.ERROR, SqTokenKind.EOF]:
             return False
-        return not self.value[0].isalnum() and not (self.value.startswith("{") and not self.value.startswith("}"))
+        return not self.value[0].isalnum() and not (self.value.startswith("{") and self.value.endswith("}"))
 
 KEYWORDS = dict(
-    (x.value, x) for x in TokenKind if x.is_keyword()
+    (x.value, x) for x in SqTokenKind if x.is_keyword()
 )
 
 # Also contains () and similar
 SINGLECHAR_OPERATORS = dict(
-    (x.value, x) for x in TokenKind if len(x.value) == 1 and x.is_symbolic()
+    (x.value, x) for x in SqTokenKind if len(x.value) == 1 and x.is_symbolic()
 )
 MULTICHAR_MARKERS = frozenset(
-    x.value[0] for x in TokenKind if len(x.value) > 1 and x.is_symbolic()
+    x.value[0] for x in SqTokenKind if len(x.value) > 1 and x.is_symbolic()
 )
 MULTICHAR_OPERATORS = dict(
-    (x.value, x) for x in TokenKind if len(x.value) > 1 and x.is_symbolic()
+    (x.value, x) for x in SqTokenKind if len(x.value) > 1 and x.is_symbolic()
 )
-for t in TokenKind:
+for t in SqTokenKind:
     if t.is_symbolic():
         # Some logic must change if operators become longer
         assert len(t.value) < 3, t.value
@@ -113,8 +115,8 @@ class LineInfo:
         return f"{self.line + 1}:{self.column_start + 1}"
 
 
-class Token:
-    def __init__(self, kind: TokenKind, literal: str, *, line: int, column_start: int, column_end: int) -> None:
+class SqToken:
+    def __init__(self, kind: SqTokenKind, literal: str, *, line: int, column_start: int, column_end: int) -> None:
         self.kind = kind
         self.literal = literal
 
@@ -133,16 +135,16 @@ class Token:
         val = self.kind.value
         if val.startswith("{"):
             match self.kind:
-                case TokenKind.IDENTIFIER:
+                case SqTokenKind.IDENTIFIER:
                     return val.format(identifier=self.literal)
-                case TokenKind.INTEGER:
-                    return val.format(integer=str(self.value))
-                case TokenKind.DECIMAL:
-                    return val.format(decimal=str(self.value))
-                case TokenKind.STRING:
-                    return val.format(string=f"\"{self.value}\"")
-                case TokenKind.SINGLE_LINE_DOC_COMMENT:
-                    return val.format(doc=self.value)
+                case SqTokenKind.INTEGER:
+                    return val.format(integer=self.literal)
+                case SqTokenKind.DECIMAL:
+                    return val.format(decimal=self.literal)
+                case SqTokenKind.STRING:
+                    return val.format(string=self.literal)
+                case SqTokenKind.SINGLE_LINE_DOC_COMMENT:
+                    return val.format(doc=self.literal)
                 case _:
                     raise SerqInternalError(f"Unhandled token kind: {self.kind.name}")
         else:
@@ -187,8 +189,8 @@ class Tokenizer:
             self.advance()
         return result
 
-    def make_token(self, kind: TokenKind, literal: str) -> Token:
-        return Token(
+    def make_token(self, kind: SqTokenKind, literal: str) -> SqToken:
+        return SqToken(
             kind=kind,
             literal=literal,
             line=self.line,
@@ -196,7 +198,7 @@ class Tokenizer:
             column_end=self.column,
         )
 
-    def report_error(self, message: str, tok: Token):
+    def report_error(self, message: str, tok: SqToken):
         if self.filepath != None:
             location_str = f"\nAt: {self.filepath.absolute()}:{tok.get_line_info().to_path_cursor()}"
         else:
@@ -205,7 +207,7 @@ class Tokenizer:
         message += location_str
         raise TokenizerError(message)
 
-    def process_iter(self) -> Iterator[Token]:
+    def process_iter(self) -> Iterator[SqToken]:
         while self.remaining > 0:
             c = self.peek(0)
 
@@ -220,8 +222,8 @@ class Tokenizer:
                         break
                     ident += cc
                     self.advance()
-                kind = KEYWORDS.get(ident, TokenKind.IDENTIFIER)
-                yield Token(
+                kind = KEYWORDS.get(ident, SqTokenKind.IDENTIFIER)
+                yield SqToken(
                     kind=kind,
                     literal=ident,
                     line=self.line,
@@ -230,16 +232,6 @@ class Tokenizer:
                 )
             elif c.isspace():
                 # space; advance keeps track of line and column already
-                if c == "\n":
-                    p = self.peek(1)
-                    if p != "\n" and not p.isspace():
-                        yield Token(
-                            kind=TokenKind.NEWLINE,
-                            literal=c,
-                            line=self.line,
-                            column_start=self.column - len(c),
-                            column_end=self.column,
-                        )
                 self.advance()
             elif c.isnumeric():
                 # int or float
@@ -254,16 +246,16 @@ class Tokenizer:
                     self.advance()
                 dot_count = lit.count(".")
                 if dot_count == 0:
-                    yield Token(
-                        kind=TokenKind.INTEGER,
+                    yield SqToken(
+                        kind=SqTokenKind.INTEGER,
                         literal=lit,
                         line=self.line,
                         column_start=self.column - len(lit),
                         column_end=self.column,
                     )
                 elif dot_count == 1:
-                    yield Token(
-                        kind=TokenKind.DECIMAL,
+                    yield SqToken(
+                        kind=SqTokenKind.DECIMAL,
                         literal=lit,
                         line=self.line,
                         column_start=self.column - len(lit),
@@ -272,7 +264,7 @@ class Tokenizer:
                 else:
                     self.report_error(
                         f"Numeric literal with {dot_count} dots found: {lit}",
-                        self.make_token(TokenKind.ERROR, lit)
+                        self.make_token(SqTokenKind.ERROR, lit)
                     )
             elif c == '"':
                 self.advance()
@@ -293,10 +285,10 @@ class Tokenizer:
                 if not found_quote:
                     self.report_error(
                         f"Encountered an unclosed string literal: {lit}",
-                        self.make_token(TokenKind.ERROR, lit)
+                        self.make_token(SqTokenKind.ERROR, lit)
                     )
-                yield Token(
-                    kind=TokenKind.STRING,
+                yield SqToken(
+                    kind=SqTokenKind.STRING,
                     literal=lit,
                     line=self.line,
                     column_start=self.column - len(lit),
@@ -309,7 +301,7 @@ class Tokenizer:
                     com = self.take_while(lambda x: x != "\n")
                     if com.startswith("///"):
                         yield self.make_token(
-                            TokenKind.SINGLE_LINE_DOC_COMMENT,
+                            SqTokenKind.SINGLE_LINE_DOC_COMMENT,
                             com,
                         )
                 else:
@@ -319,7 +311,7 @@ class Tokenizer:
                         tmp = c + self.peek(1)
                         multichar_op = MULTICHAR_OPERATORS.get(tmp, None)
                         if multichar_op != None:
-                            yield Token(
+                            yield SqToken(
                                 kind=multichar_op,
                                 literal=tmp,
                                 line=self.line,
@@ -330,8 +322,8 @@ class Tokenizer:
                             put_multichar = True
                     if not put_multichar:
                         if c not in SINGLECHAR_OPERATORS:
-                            self.report_error(f"Unrecognized symbol: '{c}'", self.make_token(TokenKind.ERROR, c))
-                        yield Token(
+                            self.report_error(f"Unrecognized symbol: '{c}'", self.make_token(SqTokenKind.ERROR, c))
+                        yield SqToken(
                             kind=SINGLECHAR_OPERATORS[c],
                             literal=c,
                             line=self.line,
@@ -339,7 +331,7 @@ class Tokenizer:
                             column_end=self.column,
                         )
                     self.advance()
-        yield self.make_token(TokenKind.EOF, "")
+        yield self.make_token(SqTokenKind.EOF, "")
 
-    def process(self) -> list[Token]:
+    def process(self) -> list[SqToken]:
         return list(self.process_iter())

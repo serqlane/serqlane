@@ -7,9 +7,8 @@ import pathlib
 import hashlib
 import textwrap
 
-from lark import Token, Tree
-
-from serqlane.parser import SerqParser
+from serqlane.new_parser import Token, Tree, SerqParser
+#from serqlane.parser import SerqParser
 from serqlane.common import SerqInternalError
 
 
@@ -1650,7 +1649,7 @@ class Module:
         self.global_scope = Scope(graph)
         self.id = id
         self.hash = hashlib.md5(contents.encode()).digest()
-        self.lark_tree = self.graph.serq_parser.parse(contents, display=False)
+        self.lark_tree = SerqParser(raw_data=contents).parse()#self.graph.serq_parser.parse(contents, display=False)
         self.ast: Node = None
         # mapping of (name, dict[params]) -> Type
         self.generic_cache: dict[tuple[str, dict[Symbol, Type]], Type] = {}
@@ -1677,8 +1676,6 @@ class ModuleGraph:
         self.modules: dict[str, Module] = {} # TODO: Detect duplicates based on hash, reduce workload
         self._next_id = 0 # TODO: Generate in a smarter way
         self.sym_id_gen = IdGen()
-
-        self.serq_parser = SerqParser()
 
         self.builtin_scope = Scope(self) # TODO: Remove
 
