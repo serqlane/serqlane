@@ -66,6 +66,7 @@ class SqTokenKind(Enum):
 
     STRUCT = "struct"
     FN = "fn"
+    ALIAS = "alias"
 
     # special
     IDENTIFIER = "{identifier}"

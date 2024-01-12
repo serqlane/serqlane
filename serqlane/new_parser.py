@@ -247,6 +247,14 @@ class SerqParser:
 
         return result
     
+    def _eat_alias(self) -> Tree:
+        self.expect([SqTokenKind.ALIAS])
+        result = Tree("alias_definition")
+        result.add(self._eat_identifier())
+        self.expect([SqTokenKind.EQ])
+        result.add(self._eat_identifier())
+        return result
+    
     def _eat_statement(self) -> Optional[Tree]:
         tok = self.peek(0)
         result = Tree("statement")
@@ -262,6 +270,8 @@ class SerqParser:
                 return None
             case SqTokenKind.STRUCT:
                 result.add(self._eat_struct())
+            case SqTokenKind.ALIAS:
+                result.add(self._eat_alias())
             case SqTokenKind.LET:
                 if self._cur_decorator != None:
                     raise ParserError("Decorators aren't allowed for let statements")
