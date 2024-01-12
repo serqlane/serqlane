@@ -153,6 +153,8 @@ class SerqParser:
             SqTokenKind.OR,
 
             SqTokenKind.DOT,
+
+            SqTokenKind.NOT,
         ])
         match op.kind:
             case SqTokenKind.PLUS | SqTokenKind.MINUS | SqTokenKind.STAR | SqTokenKind.SLASH | SqTokenKind.MODULUS \
@@ -212,6 +214,15 @@ class SerqParser:
             lhs = res
             res = Tree("fn_call_expr", children=[lhs, args])
         return self._wrap_expr(res)
+
+    def _descend_unary_expr(self) -> Tree:
+        expr_or_op = self.peek(0)
+        if expr_or_op.kind in [SqTokenKind.MINUS, SqTokenKind.NOT]:
+            op = self._eat_operator()
+            rhs = self._descend_unary_expr()
+            return self._wrap_expr(Tree("unary_expression", children=[op, rhs]))
+        else:
+            return self._descend_atom_expr()
 
     def _descend_dot_expr(self) -> Tree:
         expr = self._descend_atom_expr()

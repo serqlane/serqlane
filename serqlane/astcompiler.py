@@ -762,9 +762,6 @@ class Scope:
         assert type(name) == str
         if checked and self.lookup(name, shallow=shallow): raise ValueError(f"redefinition of {name}")
 
-        if name in RESERVED_KEYWORDS:
-            raise ValueError(f"Cannot use reserved keyword `{name}` as a symbol name")
-
         result = Symbol(self.module_graph.sym_id_gen.next(), name=name)
         self.inject(result)
         return result

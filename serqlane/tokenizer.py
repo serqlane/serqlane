@@ -50,6 +50,7 @@ class SqTokenKind(Enum):
     
     AND = "and"
     OR = "or"
+    NOT = "not"
     
     LET = "let"
     MUT = "mut"
