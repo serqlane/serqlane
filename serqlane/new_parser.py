@@ -115,6 +115,7 @@ class SerqParser:
             SqTokenKind.TRUE,
             SqTokenKind.FALSE,
             SqTokenKind.IDENTIFIER,
+            SqTokenKind.OPEN_PAREN
         ])
 
         res: Optional[Tree] = None
@@ -127,6 +128,9 @@ class SerqParser:
                 res = Tree("bool", children=[Token(x.literal, x.literal)])
             case SqTokenKind.IDENTIFIER:
                 res = self._make_identifier(x)
+            case SqTokenKind.OPEN_PAREN:
+                res = Tree("grouped_expression", children=[self._eat_expression()])
+                self.expect([SqTokenKind.CLOSE_PAREN])
             case _:
                 raise NotImplementedError(x.kind)
         if res == None:
