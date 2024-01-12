@@ -357,6 +357,30 @@ class SerqParser:
         result = Tree("import_stmt", children=[self._eat_identifier()])
         return result
 
+    def _eat_from_import(self) -> Tree:
+        self.expect([SqTokenKind.FROM])
+        module_ident = self._eat_identifier()
+        self.expect([SqTokenKind.IMPORT])
+        cursor = self.expect([SqTokenKind.OPEN_SQUARE, SqTokenKind.STAR])
+        if cursor.kind == SqTokenKind.OPEN_SQUARE:
+            node: Optional[Tree] = None
+            if self.peek(0).kind != SqTokenKind.CLOSE_SQUARE:
+                ident_list = Tree("import_list")
+                while True:
+                    ident = self._eat_identifier()
+                    ident_list.add(ident)
+                    if self.peek(0).kind != SqTokenKind.COMMA:
+                        break
+                node = Tree("import_from_stmt", children=[module_ident, ident_list])
+            else:
+                node = Tree("import_from_stmt", children=[module_ident, None])
+            self.expect([SqTokenKind.CLOSE_SQUARE])
+            return node
+        else:
+            if cursor.kind != SqTokenKind.STAR:
+                raise NotImplementedError(cursor.kind)
+            return Tree("import_all_from_stmt", children=[module_ident])
+
     def _eat_statement(self) -> Optional[Tree]:
         tok = self.peek(0)
         result = Tree("statement")
@@ -400,6 +424,8 @@ class SerqParser:
                 result.add(self._eat_if_stmt())
             case SqTokenKind.IMPORT:
                 result.add(self._eat_import())
+            case SqTokenKind.FROM:
+                result.add(self._eat_from_import())
             case _:
                 expr = self._eat_expression()
                 if expr == None:
