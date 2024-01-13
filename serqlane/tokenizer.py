@@ -41,6 +41,7 @@ class SqTokenKind(Enum):
     ARROW = "->"
     COLON = ":"
     DOT = "."
+    DOTDOT = ".."
     COMMA = ","
     AT = "@"
 

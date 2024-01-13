@@ -1,9 +1,11 @@
+import pathlib
+
 from collections.abc import Callable
 from typing import Any
 import pytest
 
 from serqlane.vm import SerqVM
-from serqlane.astcompiler import ModuleGraph, Module
+from serqlane.astcompiler import ModuleGraph, Module, MAGIC_MODULE_NAME
 
 
 type ModuleMap = dict[str, str]
@@ -12,11 +14,12 @@ type ModuleMap = dict[str, str]
 @pytest.fixture(scope="session")
 def module_graph() -> ModuleGraph:
     graph = ModuleGraph()
-    graph.request_module("magics")
+    graph.request_module(MAGIC_MODULE_NAME)
     return graph
 
 def clear_graph(graph: ModuleGraph):
-    graph.modules = {"magics": graph.modules["magics"]}
+    magic_path = pathlib.Path(MAGIC_MODULE_NAME + ".serq").absolute()
+    graph.modules = {magic_path: graph.modules[magic_path]}
 
 
 # TODO: multi-module version
@@ -33,7 +36,7 @@ def serq_module(module_graph: ModuleGraph) -> Callable[[str], Module]:
 def renderer(serq_module) -> Callable[[str], str]:
     def execute(code: str):
         # TODO: don't do this removeprefix
-        return serq_module(code).ast.render().removeprefix("from magics import *\n")
+        return serq_module(code).ast.render().removeprefix(f"from {MAGIC_MODULE_NAME} import *\n")
 
     return execute
 
