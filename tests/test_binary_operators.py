@@ -10,25 +10,57 @@ literal_arith_tests = [
     ("dbg(10 / (3 + 2))", 2),
     ("dbg((10 / (3 + 2)))", 2),
     ("dbg(10 % 3)", 1),
+    ("dbg(1.1 + 1.1)", 2.2),
+    ("dbg(4 and 2)", 0),
+    ("dbg(true or false)", True),
+    ("dbg(1 != 2)", True),
+    ("dbg(1 < 2)", True),
+    ("dbg(2 <= 2)", True),
+    ("dbg(2 > 3)", False),
+    ("dbg(2 >= 2)", True),
 ]
 
 variable_arith_tests = [
-    (
-        """
+    ("""
 let x = 1
 let y = x + 2
 dbg(y)
-""",
-        3,
-    ),
-    (
-        """
+""",3),
+    ("""
 let x = 1
 let y = x + x
 dbg(y)
-""",
-        2,
-    ),
+""",2),
+    ("""
+let x = 1
+let y = x * x
+dbg(y)
+""",1),
+    ("""
+let x = 8
+let y = x % x
+dbg(y)
+""",0),
+    ("""
+let x = true
+let y = x != x
+dbg(y)
+""",False),
+    ("""
+let x = 200
+let y = x < 300
+dbg(y)
+""",True),
+    ("""
+let x = 300
+let y = x <= 300
+dbg(y)
+""",True),
+    ("""
+let x = 300
+let y = x >= 300
+dbg(y)
+""",True),
 ]
 
 # code
@@ -44,6 +76,10 @@ let y: int64 = (x + x) - y
 """,
     """
 let x = 1 == true
+""",
+    """
+let x = 1
+let y = x + 1.1
 """,
 ]
 

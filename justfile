@@ -26,6 +26,11 @@ update-commit: update && create-tag
     git commit -am "bump deps"
     git push
 
+# coverage tests
+cov:
+    poetry run pytest --cov=serqlane --cov-report html
+    firefox htmlcov/index.html
+
 # format
 format:
     # TODO: treefmt?

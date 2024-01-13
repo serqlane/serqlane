@@ -1,5 +1,7 @@
 import pytest
 
+from serqlane.parser import ParserError
+
 
 # [({module_name: code}, expected)]
 import_tests = [
@@ -68,3 +70,22 @@ def test_imports_passing(multimodule_capture_first_debug, modules, expected):
 # for some reason this is allowed
 def test_no_op_import(multimodule_executor):
     multimodule_executor({"main": "from other import []", "other": ""})
+
+
+# [({module_name: code}, raises)]
+failing_import_tests = [
+    ({"main": "from other import [foo]\nfoo()", "other": "fn foo() {}"}, ValueError),
+    ({"main": "from other import []\nother.abc()", "other": ""}, ValueError),
+    ({"main": "import 1"}, ParserError),
+]
+
+
+@pytest.mark.parametrize("modules,raises", failing_import_tests)
+def test_failing_import_tests(
+    multimodule_executor,
+    modules: dict[str, str], 
+    raises: type[Exception],
+    ):
+    with pytest.raises(raises):
+        multimodule_executor(modules)
+

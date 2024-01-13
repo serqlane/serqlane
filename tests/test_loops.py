@@ -1,3 +1,6 @@
+import pytest
+
+
 def test_while(capture_first_debug):
     code = """
 let mut x = 10
@@ -39,3 +42,11 @@ dbg(x)
 """
 
     assert capture_first_debug(code) == 0
+
+
+def test_break_continue_outside_loop(executor):
+    with pytest.raises(ValueError):
+        executor("break")
+
+    with pytest.raises(ValueError):
+        executor("continue")
