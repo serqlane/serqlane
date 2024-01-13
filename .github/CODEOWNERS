@@ -1,7 +1,9 @@
 serqlane/astcompiler.py @SirOlaf
+serqlane/parser.py @SirOlaf @StarrFox
 serqlane/grammar.lark @SirOlaf @StarrFox
 serqlane/vm.py @StarrFox
 .github/* @StarrFox
 tests/* @StarrFox
 flake.nix @StarrFox
 flake.lock @StarrFox
+docs/* @SolarWolf-Code

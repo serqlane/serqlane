@@ -7,12 +7,14 @@ import pathlib
 import hashlib
 import textwrap
 
-from lark import Token, Tree
-
-from serqlane.parser import SerqParser
+from serqlane.parser import Token, Tree, SerqParser
+#from serqlane.parser import SerqParser
+from serqlane.common import SerqInternalError
 
 
 DEBUG = False
+
+MAGIC_MODULE_NAME = "serqlib/magics"
 
 
 RESERVED_KEYWORDS = [
@@ -34,7 +36,6 @@ RESERVED_KEYWORDS = [
 ]
 
 
-class SerqInternalError(Exception): ...
 class SerqTypeInferError(Exception): ... # TODO: Get rid of this
 
 
@@ -61,6 +62,14 @@ class NodeSymbol(Node):
 
     def render(self) -> str:
         # TODO: Unique global identifier later
+        return f"{self.symbol.render()}"
+
+class NodeModuleSymbol(Node):
+    def __init__(self, symbol: Symbol, type: Type) -> None:
+        super().__init__(type)
+        self.symbol = symbol
+
+    def render(self) -> str:
         return f"{self.symbol.render()}"
 
 class NodeOptions(Node):
@@ -293,7 +302,10 @@ class NodeStructDefinition(Node):
 
     def render(self) -> str:
         field_strs = "\n".join(["  " + x.render() for x in self.fields])
-        return f"struct {self.sym.render()} {{\n{field_strs}\n}}"
+        body_str = "{}" if len(field_strs) == 0 else f"{{\n{field_strs}\n}}"
+        magic_str = "@magic " if self.sym.magic else ""
+        pub_str = "pub " if self.sym.public else ""
+        return f"{magic_str}{pub_str}struct {self.sym.render()} {body_str}"
 
 class NodeFnParameters(Node):
     def __init__(self, args: list[tuple[NodeSymbol, Node]]):
@@ -331,26 +343,28 @@ class NodeFnCall(Node):
         return f"{self.original_callee.render()}({args})"
 
 class NodeImport(Node):
-    def __init__(self, module_sym: Symbol, type: Type) -> None:
+    def __init__(self, module_sym: Symbol, orig_path: str, type: Type) -> None:
         super().__init__(type)
         self.module_sym = module_sym
+        self.orig_path = orig_path
 
     def render(self) -> str:
-        return f"import {self.module_sym.render()}"
+        return f"import {self.orig_path}"
 
 class NodeFromImport(Node):
-    def __init__(self, module_sym: Symbol, to_import: list[NodeOptions], type: Type, *, wildcard=False) -> None:
+    def __init__(self, module_sym: Symbol, to_import: list[NodeOptions], orig_path: str, type: Type, *, wildcard=False) -> None:
         super().__init__(type)
         self.module_sym = module_sym
         self.to_import = to_import
         self.wildcard = wildcard
+        self.orig_path = orig_path
 
     def render(self) -> str:
         if self.wildcard:
-            return f"from {self.module_sym.render()} import *"
+            return f"from {self.orig_path} import *"
         else:
             names = ", ".join([x.render() for x in self.to_import])
-            return f"from {self.module_sym.render()} import [{names}]"
+            return f"from {self.orig_path} import [{names}]"
 
 
 # TODO: Use these, will make later analysis easier
@@ -364,7 +378,7 @@ class SymbolKind(Enum):
 
 # TODO: Give every symbol a generation. Deferred function bodies should not be able to look up globals defined after themselves
 class Symbol:
-    def __init__(self, id: str, name: str, type: Type = None, mutable: bool = False, magic=False) -> None:
+    def __init__(self, id: str, name: str, type: Type = None, mutable: bool = False, magic=False, *, source_module: Optional[Module]) -> None:
         # TODO: Should store the source node, symbol kinds
         self.id = id
         self.name = name
@@ -373,6 +387,12 @@ class Symbol:
         self.mutable = mutable
         self.definition_node: Node = None
         self.magic = magic
+        self._source_module = source_module
+
+    def comes_from_module(self, module: Module):
+        if self._source_module == None:
+            return True
+        return module == self._source_module
 
     def qualified_name(self):
         return self.name + self.id
@@ -432,6 +452,7 @@ class TypeKind(Enum):
     type = auto() # TODO: magic that holds a type itself, not yet in grammar
 
     module = auto() # Comes from imports: `import x` -> x is a sym of type module
+    namespace = auto() # Comes from imports: `import a.b` -> `a` is a namespace and `b` is a module inside of `a`
 
 int_types = frozenset([
     TypeKind.int8,
@@ -599,16 +620,18 @@ class Type:
         """
         Turns a literal into a concrete type
         """
+        # TODO: Move this out of Type. A type shouldn't instantiate itself for lack of context.
+        #       Evident by the lookups below, will break stuff very soon
         assert self.kind in literal_types
         match self.kind:
             case TypeKind.literal_int:
-                return graph.builtin_scope.lookup_type("int64")
+                return graph.request_module(MAGIC_MODULE_NAME).global_scope.lookup_type("int64")
             case TypeKind.literal_float:
-                return graph.builtin_scope.lookup_type("float64")
+                return graph.request_module(MAGIC_MODULE_NAME).global_scope.lookup_type("float64")
             case TypeKind.literal_bool:
-                return graph.builtin_scope.lookup_type("bool")
+                return graph.request_module(MAGIC_MODULE_NAME).global_scope.lookup_type("bool")
             case TypeKind.literal_string:
-                return graph.builtin_scope.lookup_type("string")
+                return graph.request_module(MAGIC_MODULE_NAME).global_scope.lookup_type("string")
             case _:
                 raise SerqInternalError(f"Forgot a literal type: {self.kind}")
 
@@ -626,7 +649,7 @@ class Type:
 
 
 class Scope:
-    def __init__(self, graph: ModuleGraph, module: Optional[Module] = None) -> None:
+    def __init__(self, graph: ModuleGraph, module: Optional[Module]) -> None:
         self._local_syms: list[Symbol] = []
         self.module_graph = graph # TODO: Get rid of builtin hack
         self.module = module
@@ -669,12 +692,30 @@ class Scope:
                 return True
         return False
 
+    def _inject_import_namespaces(self, path: str, module_sym: Symbol):
+        if path == MAGIC_MODULE_NAME:
+            return
+        parts = path.split("/")
+        if parts[0].startswith("."):
+            parts = parts[1:]
+
+        if len(parts) == 1:
+            self.get_oldest_sibling().inject(module_sym)
+        else:
+            if len(parts) == 0:
+                raise SerqInternalError("Tried importing an empty path")
+            ns = self.put_namespace(parts[0])
+            for i in range(1, len(parts) - 1):
+                ns = ns.type.data.put_namespace(parts[i])
+            ns.type.data.inject(module_sym)
+
     # TODO: Add a check to prevent conflicts
     def do_basic_import(self, node: NodeImport):
         self._imported_modules.add(node.module_sym.type.data)
-        self.get_oldest_sibling().inject(node.module_sym)
+        self._inject_import_namespaces(node.orig_path, node.module_sym)
 
     def do_from_import(self, node: NodeFromImport):
+        # TODO: Replicate namespace logic from above!!!
         if node.wildcard:
             syms = list(node.module_sym.type.data.global_scope.iter_syms(only_public=True, include_magics=False, include_imports=False))
             self._imported_syms[node.module_sym.type.data] = syms
@@ -686,6 +727,7 @@ class Scope:
                         raise ValueError("Tried to import a non-symbol")
                     syms.append(option.symbol)
             self._imported_syms[node.module_sym.type.data] = syms
+        self._inject_import_namespaces(node.orig_path, node.module_sym)
 
     def _iter_syms_impl(self, shallow=False, *, include_magics=True, include_imports=False) -> Iterator[Symbol]:
         # prefer magics
@@ -712,7 +754,6 @@ class Scope:
         if include_imports:
             oldest = older if older != None else self
             for mod, syms in oldest._imported_syms.items():
-                yield mod.sym
                 for sym in syms:
                     yield sym
 
@@ -758,10 +799,7 @@ class Scope:
         assert type(name) == str
         if checked and self.lookup(name, shallow=shallow): raise ValueError(f"redefinition of {name}")
 
-        if name in RESERVED_KEYWORDS:
-            raise ValueError(f"Cannot use reserved keyword `{name}` as a symbol name")
-
-        result = Symbol(self.module_graph.sym_id_gen.next(), name=name)
+        result = Symbol(self.module_graph.sym_id_gen.next(), name=name, source_module=self.module)
         self.inject(result)
         return result
     
@@ -777,7 +815,7 @@ class Scope:
     def put_magic(self, name: str) -> Symbol:
         assert type(name) == str
         if self.lookup(name, shallow=True): raise SerqInternalError(f"redefinition of magic sym: {name}")
-        result = Symbol(self.module_graph.sym_id_gen.next(), name=name, magic=True)
+        result = Symbol(self.module_graph.sym_id_gen.next(), name=name, magic=True, source_module=self.module)
         self._local_syms.append(result)
         return result
 
@@ -803,13 +841,25 @@ class Scope:
         sym.mutable = mutable
         return sym
 
+    def put_namespace(self, name: str) -> Symbol:
+        existing: Optional[Symbol] = None
+        for s in self.iter_syms(name, include_magics=False):
+            if s.type.kind == TypeKind.namespace:
+                existing = s
+        if existing != None:
+            return existing
+
+        sym = self.put(name)
+        sym.type = Type(kind=TypeKind.namespace, sym=sym, data=Scope(graph=self.module_graph, module=self.module))
+        return sym
+
     def make_child(self) -> Scope:
-        res = Scope(self.module_graph)
+        res = Scope(self.module_graph, module=self.module)
         res.parent = self
         return res
 
     def make_sibling(self) -> Scope:
-        res = Scope(self.module_graph)
+        res = Scope(self.module_graph, module=self.module)
         res.parent = self.parent
         res.older_sibling = self
         return res
@@ -886,34 +936,41 @@ class CompCtx:
             case _:
                 raise SerqInternalError(f"Unimplemented statement type: {child.data}")
 
-    def handle_from_import(self, tree: Tree, *, wildcard: bool):
-        import_path = tree.children[0].children[0].value
+    def make_from_import_node(self, import_path: str, names = [], *, wildcard: bool) -> NodeFromImport:
         module = self.graph.request_module(import_path)
         to_import = []
         if not wildcard:
-            if tree.children[1] != None:
-                for ident_node in tree.children[1].children:
-                    ident = ident_node.children[0].value
-                    option_node = NodeOptions(self.get_unit_type())
-                    for sym in module.global_scope.iter_syms(name=ident, include_magics=False, only_public=True):
-                        option_node.options.append(NodeSymbol(sym, sym.type))
-                    if len(option_node.options) == 0:
-                        raise ValueError(f"Could not find public symbol `{ident}` in module `{module.name}`")
-                    to_import.append(option_node)
+            for ident in names:
+                option_node = NodeOptions(self.get_unit_type())
+                for sym in module.global_scope.iter_syms(name=ident, include_magics=False, only_public=True):
+                    option_node.options.append(NodeSymbol(sym, sym.type))
+                if len(option_node.options) == 0:
+                    raise ValueError(f"Could not find public symbol `{ident}` in module `{module.name}`")
+                to_import.append(option_node)
         res = NodeFromImport(
             module_sym=module.sym,
             to_import=to_import,
+            orig_path=import_path,
             type=self.get_unit_type(),
             wildcard=wildcard
         )
         self.current_scope.do_from_import(res)
         return res
 
+    def handle_from_import(self, tree: Tree, *, wildcard: bool) -> NodeFromImport:
+        import_path = tree.children[0].value
+        names = []
+        if not wildcard and tree.children[1] != None:
+            for ident_node in tree.children[1].children:
+                ident = ident_node.children[0].value
+                names.append(ident)
+        return self.make_from_import_node(import_path=import_path, names=names, wildcard=wildcard)
+
     def handle_import(self, tree: Tree):
         # TODO: More complex handling. Doing it like this has millions of issues, but good enough for first prototype
-        import_path = tree.children[0].children[0].value
+        import_path = tree.children[0].value
         module = self.graph.request_module(import_path)
-        res = NodeImport(module.sym, self.get_unit_type())
+        res = NodeImport(module.sym, orig_path=import_path, type=self.get_unit_type())
         self.current_scope.do_basic_import(res)
         return res
 
@@ -945,9 +1002,11 @@ class CompCtx:
 
     def if_stmt(self, tree: Tree, expected_type: Type) -> NodeIfStmt:
         assert tree.data == "if_stmt", tree.data
-        assert expected_type.kind == TypeKind.unit # TODO: if expressions are not unit, need to guarantee valid else branch
+        assert expected_type.kind in [TypeKind.unit, TypeKind.infer] # TODO: if expressions are not unit, need to guarantee valid else branch
         # Same scoping story as in while_stmt
         if_cond = self.expression(tree.children[0], self.current_scope.lookup_type("bool", shallow=True))
+        if isinstance(if_cond, NodeOptions):
+            if_cond = if_cond.extract_unambiguous()
         assert if_cond.type.kind == TypeKind.bool
         if_body = self.handle_block(tree.children[1], self.get_unit_type())
 
@@ -1012,9 +1071,9 @@ class CompCtx:
         if literal_kind is TypeKind.literal_string:
             value = self.resolve_escape_sequence(value)
 
-        if expected_type is not None:
+        if expected_type != None:
             if expected_type.kind in free_infer_types:
-                expected_type = self.current_scope.lookup_type(lookup_name, shallow=True)
+                expected_type = self.current_scope.lookup_type(lookup_name, shallow=False)
             else:
                 if not expected_type.types_compatible(Type(literal_kind, sym=None)):
                     raise SerqTypeInferError()
@@ -1049,12 +1108,18 @@ class CompCtx:
         if isinstance(lhs, NodeOptions):
             lhs = lhs.use_first()
         # TODO: Can the symbol be captured somehow?
-        op = tree.children[1].data.value
+        op = tree.children[1].data
         # a dot expression does not work by the same type rules
         if op != "dot":
             rhs = self.expression(tree.children[2], None)
             if isinstance(rhs, NodeOptions):
                 rhs = rhs.use_first()
+
+            lhs_lit = isinstance(lhs, NodeLiteral)
+            rhs_lit = isinstance(rhs, NodeLiteral)
+            both_lit = lhs_lit and rhs_lit
+            if both_lit and type(lhs_lit) != type(rhs_lit):
+                raise ValueError("Incompatible literal node types")
 
             # TODO: Dot expr
             if not lhs.type.types_compatible(rhs.type):
@@ -1110,45 +1175,77 @@ class CompCtx:
         match op:
             case "plus":
                 assert expr_type.kind in arith_types
+                if both_lit:
+                    return type(lhs)(lhs.value + rhs.value, type=lhs.type)
                 return NodePlusExpr(lhs, rhs, type=expr_type)
             case "minus":
                 assert expr_type.kind in arith_types
+                if both_lit:
+                    return type(lhs)(lhs.value - rhs.value, type=lhs.type)
                 return NodeMinusExpression(lhs, rhs, type=expr_type)
             case "star":
                 assert expr_type.kind in arith_types
+                if both_lit:
+                    return type(lhs)(lhs.value * rhs.value, type=lhs.type)
                 return NodeMulExpression(lhs, rhs, type=expr_type)
             case "slash":
                 assert expr_type.kind in arith_types
+                if both_lit:
+                    return type(lhs)(lhs.value / rhs.value, type=lhs.type)
                 return NodeDivExpression(lhs, rhs, type=expr_type)
             
             case "modulus":
                 assert expr_type.kind in int_types
+                if both_lit:
+                    return type(lhs)(lhs.value % rhs.value, type=lhs.type)
                 return NodeModExpression(lhs, rhs, type=expr_type)
             
             case "and":
                 assert expr_type.kind in logical_types
+                if both_lit:
+                    if lhs.type.kind in arith_types:
+                        return type(lhs)(lhs.value & rhs.value, type=lhs.type)
+                    else:
+                        return NodeBoolLit(lhs.value and rhs.value, type=expr_type)
                 return NodeAndExpression(lhs, rhs, type=expr_type)
             case "or":
                 assert expr_type.kind in logical_types
+                if both_lit:
+                    if lhs.type.kind in arith_types:
+                        return type(lhs)(lhs.value | rhs.value, type=lhs.type)
+                    else:
+                        return NodeBoolLit(lhs.value or rhs.value, type=expr_type)
                 return NodeOrExpression(lhs, rhs, type=expr_type)
             
             # TODO: Is this version of ensure_types correct here?
             case "equals":
+                if both_lit:
+                    return NodeBoolLit(lhs.value == rhs.value, type=self.current_scope.lookup_type("bool"))
                 return NodeEqualsExpression(lhs, rhs, type=self.current_scope.lookup_type("bool"))
             case "not_equals":
+                if both_lit:
+                    return NodeBoolLit(lhs.value != rhs.value, type=self.current_scope.lookup_type("bool"))
                 return NodeNotEqualsExpression(lhs, rhs, type=self.current_scope.lookup_type("bool"))
             case "less":
                 # TODO: Ordinal types.
                 assert expr_type.kind in arith_types
+                if both_lit:
+                    return NodeBoolLit(lhs.value < rhs.value, type=self.current_scope.lookup_type("bool"))
                 return NodeLessExpression(lhs, rhs, type=self.current_scope.lookup_type("bool"))
             case "lesseq":
                 assert expr_type.kind in arith_types
+                if both_lit:
+                    return NodeBoolLit(lhs.value <= rhs.value, type=self.current_scope.lookup_type("bool"))
                 return NodeLessEqualsExpression(lhs, rhs, type=self.current_scope.lookup_type("bool"))
             case "greater":
                 assert expr_type.kind in arith_types
+                if both_lit:
+                    return NodeBoolLit(lhs.value > rhs.value, type=self.current_scope.lookup_type("bool"))
                 return NodeGreaterExpression(lhs, rhs, type=self.current_scope.lookup_type("bool"))
             case "greatereq":
                 assert expr_type.kind in arith_types
+                if both_lit:
+                    return NodeBoolLit(lhs.value >= rhs.value, type=self.current_scope.lookup_type("bool"))
                 return NodeGreaterEqualsExpression(lhs, rhs, type=self.current_scope.lookup_type("bool"))
 
             case "dot":
@@ -1164,6 +1261,8 @@ class CompCtx:
                         matching_field_sym = None
                         # TODO: Do a scope-esque lookup instead. Things like inheritance may silently add more things later
                         for field in lhs.type.sym.definition_node.fields:
+                            if not (field.sym.public or field.sym.comes_from_module(self.module)):
+                                continue
                             if field.sym.name == rhs:
                                 matching_field_sym = field.sym
                                 break
@@ -1171,7 +1270,6 @@ class CompCtx:
 
                         return NodeDotAccess(lhs, matching_field_sym)
                     case TypeKind.module:
-                        assert isinstance(lhs, NodeSymbol)
                         assert isinstance(lhs.type.data, Module)
                         options = NodeOptions(self.get_unit_type())
                         for sym in lhs.type.data.global_scope.iter_syms(name=rhs, shallow=True, only_public=True, include_magics=False):
@@ -1180,6 +1278,11 @@ class CompCtx:
                         if len(options.options) < 1:
                             raise ValueError(f"Could not find {rhs} in module {lhs.render()}")
                         return NodeDotAccess(lhs, options)
+                    case TypeKind.namespace:
+                        syms = list(lhs.type.data.iter_syms(name=rhs, include_magics=False))
+                        if len(syms) != 1:
+                            raise ValueError(f"Unable to find {rhs} in {lhs.render()}")
+                        return NodeDotAccess(lhs, NodeSymbol(syms[0], syms[0].type))
                     case _:
                         raise SerqInternalError(f"Dot operations for type kind `{lhs.type.kind.name}` are not yet allowed")
             case _:
@@ -1263,6 +1366,8 @@ class CompCtx:
         
         val_node_expected_type = type_sym.type if type_sym != None else self.get_infer_type()
         val_node = self.expression(tree.children[f], val_node_expected_type)
+        if isinstance(val_node, NodeOptions):
+            val_node = val_node.extract_unambiguous()
         if val_node.type.kind == TypeKind.unit:
             raise ValueError(f"Type `{val_node.type.kind.name}` is not valid for `let`")
 
@@ -1337,11 +1442,13 @@ class CompCtx:
         assert tree.data == "struct_field", tree.data
         assert expected_type.kind == TypeKind.unit
 
-        ident = tree.children[0].children[0].value
+        is_public = tree.children[0] != None
+        ident = tree.children[1].children[0].value
         sym = self.current_scope.put_let(ident, checked=True, shallow=True)
+        sym.public = is_public
 
         # TODO: Assert that this is actually a type sym. Current system isn't ready yet
-        typ_sym_node = self.user_type(tree.children[1])
+        typ_sym_node = self.user_type(tree.children[2])
 
         sym.type = typ_sym_node.type
 
@@ -1350,18 +1457,31 @@ class CompCtx:
     def struct_definition(self, tree: Tree, expected_type: Type) -> NodeStructDefinition:
         assert tree.data == "struct_definition", tree.data
         assert expected_type.kind == TypeKind.unit
-        ident = tree.children[0].children[0].value
-        sym = self.current_scope.put_type(ident)
+
+        decorator = tree.children[0].children[0].children[0].value if tree.children[0] != None else ""
+        public = tree.children[1] != None
+
+        ident = tree.children[2].children[0].value
+        sym = None
+        if decorator == "magic":
+            sym = self.current_scope.get_oldest_sibling().put_builtin_type(TypeKind[ident])
+        elif decorator == "":
+            sym = self.current_scope.get_oldest_sibling().put_type(ident)
+        else:
+            raise NotImplementedError("Non-magic struct decorators aren't supported for now")
+        sym.public = public
 
         fields = []
-        if tree.children[1] != None:
+        if tree.children[3] != None:
             self.open_scope()
-            for field_node in tree.children[1:]:
+            for field_node in tree.children[3:]:
                 # TODO: Recursion check. Recursion is currently unrestricted and permits infinite recursion
                 #   For proper recursion handling we also gotta ensure we don't try to access a type that is currently being processed like will be the case with mutual recursion
                 field = self.struct_field(field_node, self.get_unit_type())
                 fields.append(field)
             self.close_scope()
+        if decorator == "magic" and len(fields) != 0:
+            raise ValueError("Tried declaring a magic type with fields")
 
         def_node = NodeStructDefinition(sym, fields, self.get_unit_type())
         sym.definition_node = def_node
@@ -1526,7 +1646,7 @@ class CompCtx:
         callee_node = self.expression(tree.children[0], None)
         call = self.resolve_call(callee_node, tree.children[1].children if tree.children[1].children[0] != None else [])
         if call == None:
-            raise ValueError(f"No matching overload found for {tree.children[0].children[0].children[0]}")
+            raise ValueError(f"No matching overload found for {tree.children[0].children[0].children[0].value}")
         return call
 
     def expression(self, tree: Tree, expected_type: Type) -> Node:
@@ -1568,6 +1688,8 @@ class CompCtx:
     def start(self, tree: Tree) -> NodeStmtList:
         assert tree.data == "start", tree.data
         result = NodeStmtList(self.current_scope.lookup_type("unit", shallow=True))
+        if self.module.name != MAGIC_MODULE_NAME:
+            result.add(self.make_from_import_node(MAGIC_MODULE_NAME, wildcard=True))
         for child in tree.children:
             node = self.statement(child, self.get_unit_type())
             result.add(node)
@@ -1581,10 +1703,10 @@ class Module:
         self.graph = graph
 
         self.name = name
-        self.global_scope = Scope(graph)
+        self.global_scope = Scope(graph, module=self)
         self.id = id
         self.hash = hashlib.md5(contents.encode()).digest()
-        self.lark_tree = SerqParser().parse(contents, display=False)
+        self.mod_tree = SerqParser(raw_data=contents).parse()#self.graph.serq_parser.parse(contents, display=False)
         self.ast: Node = None
         # mapping of (name, dict[params]) -> Type
         self.generic_cache: dict[tuple[str, dict[Symbol, Type]], Type] = {}
@@ -1608,39 +1730,17 @@ class IdGen:
 
 class ModuleGraph:
     def __init__(self) -> None:
-        self.modules: dict[str, Module] = {} # TODO: Detect duplicates based on hash, reduce workload
+        self.modules: dict[pathlib.Path, Module] = {} # TODO: Detect duplicates based on hash, reduce workload
         self._next_id = 0 # TODO: Generate in a smarter way
         self.sym_id_gen = IdGen()
 
-        # TODO: Use a type cache instead of scope hack
-        self.builtin_scope = Scope(self)
+        self.builtin_scope = Scope(self, module=None) # TODO: Remove
 
+        # For now, unit is special because it's overused
         unit_type_sym = self.builtin_scope.put_builtin_type(TypeKind.unit)
 
-        self.builtin_scope.put_builtin_type(TypeKind.bool)
-        self.builtin_scope.put_builtin_type(TypeKind.char)
-
-        self.builtin_scope.put_builtin_type(TypeKind.int8)
-        self.builtin_scope.put_builtin_type(TypeKind.uint8)
-        self.builtin_scope.put_builtin_type(TypeKind.int16)
-        self.builtin_scope.put_builtin_type(TypeKind.uint16)
-        self.builtin_scope.put_builtin_type(TypeKind.int32)
-        self.builtin_scope.put_builtin_type(TypeKind.uint32)
-        self.builtin_scope.put_builtin_type(TypeKind.int64)
-        self.builtin_scope.put_builtin_type(TypeKind.uint64)
-
-        self.builtin_scope.put_builtin_type(TypeKind.float32)
-        self.builtin_scope.put_builtin_type(TypeKind.float64)
-
-        self.builtin_scope.put_builtin_type(TypeKind.pointer)
-
-        # TODO
-        self.builtin_scope.put_builtin_type(TypeKind.string)
-        self.builtin_scope.put_builtin_type(TypeKind.array)
-        self.builtin_scope.put_builtin_type(TypeKind.static)
-
         # TODO: hack
-        magic_sym = Symbol("-1", "magic")
+        magic_sym = Symbol("-1", "magic", source_module=None)
         magic_type = Type(TypeKind.magic, magic_sym)
         magic_sym.type = magic_type
 
@@ -1648,22 +1748,30 @@ class ModuleGraph:
         dbg_sym = self.builtin_scope.put_magic_function("dbg", dbg_sym_type)
         dbg_sym_type.sym = dbg_sym
 
+        panic_sym_type = Type(TypeKind.function, None, ([], unit_type_sym.type))
+        panic_sym = self.builtin_scope.put_magic_function("panic", panic_sym_type)
+        panic_sym_type.sym = panic_sym
 
-    def load(self, name: str, file_contents: str) -> Module:
-        assert name not in self.modules
+
+    def load(self, path: str | pathlib.Path, file_contents: str) -> Module:
+        if isinstance(path, str):
+            path = pathlib.Path(path + ".serq").absolute()
+        name = path.with_suffix("").name
+        
+        assert path not in self.modules
         mod = Module(name, self._next_id, file_contents, self)
 
         # TODO: Proper sym generation
-        mod_sym = Symbol(":module:" + str(self._next_id), name, None)
+        mod_sym = Symbol(":module:" + str(self._next_id), name, None, source_module=None)
         mod_type = Type(TypeKind.module, mod_sym, data=mod)
         mod_sym.type = mod_type
         mod.sym = mod_sym
 
         self._next_id += 1
-        self.modules[name] = mod
+        self.modules[path] = mod
         # TODO: Make sure the module isn't already being processed
         ctx = CompCtx(mod, self)
-        ast: NodeStmtList = ctx.start(mod.lark_tree)
+        ast: NodeStmtList = ctx.start(mod.mod_tree)
 
         # TODO: Check type cohesion
         ctx.handling_deferred_fn_body = True
@@ -1682,9 +1790,15 @@ class ModuleGraph:
         return mod
 
     def request_module(self, name: str) -> Optional[Module]:
-        if name in self.modules:
-            return self.modules[name]
-        elif pathlib.Path(name + ".serq").is_file():
-            return self.load(name, pathlib.Path(name + ".serq").read_text())
+        orig_name = name
+        is_std_import = name.startswith("std/")
+        if is_std_import:
+            name = "./serqlib/std/" + name[4:]
+        path = pathlib.Path(name + ".serq").absolute()
+
+        if path in self.modules:
+            return self.modules[path]
+        elif path.is_file():
+            return self.load(name, path.read_text())
         else:
-            raise ValueError(f"Unable to find import: {name}")
+            raise ValueError(f"Unable to find import: {orig_name}")

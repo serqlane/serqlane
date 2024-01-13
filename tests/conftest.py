@@ -1,20 +1,51 @@
+import pathlib
+
 from collections.abc import Callable
 from typing import Any
 import pytest
 
 from serqlane.vm import SerqVM
-from serqlane.astcompiler import ModuleGraph
+from serqlane.astcompiler import ModuleGraph, Module, MAGIC_MODULE_NAME
 
 
 type ModuleMap = dict[str, str]
 
 
+@pytest.fixture(scope="session")
+def module_graph() -> ModuleGraph:
+    graph = ModuleGraph()
+    graph.request_module(MAGIC_MODULE_NAME)
+    return graph
+
+def clear_graph(graph: ModuleGraph):
+    magic_path = pathlib.Path(MAGIC_MODULE_NAME + ".serq").absolute()
+    graph.modules = {magic_path: graph.modules[magic_path]}
+
+
+# TODO: multi-module version
 @pytest.fixture
-def executor() -> Callable[[str], SerqVM]:
+def serq_module(module_graph: ModuleGraph) -> Callable[[str], Module]:
+    def execute(code: str):
+        clear_graph(module_graph)
+        return module_graph.load("<string>", code)
+    
+    return execute
+
+
+@pytest.fixture
+def renderer(serq_module) -> Callable[[str], str]:
+    def execute(code: str):
+        # TODO: don't do this removeprefix
+        return serq_module(code).ast.render().removeprefix(f"from {MAGIC_MODULE_NAME} import *\n")
+
+    return execute
+
+
+@pytest.fixture
+def executor(serq_module) -> Callable[[str], SerqVM]:
     def execute(code: str, *, debug_hook = None):
-        graph = ModuleGraph()
+        module = serq_module(code)
         vm = SerqVM(debug_hook=debug_hook)
-        module = graph.load("<string>", code)
         vm.execute_module(module)
         return vm
 
@@ -22,9 +53,9 @@ def executor() -> Callable[[str], SerqVM]:
 
 
 @pytest.fixture
-def multimodule_executor() -> Callable[[ModuleMap], SerqVM]:
+def multimodule_executor(module_graph: ModuleGraph) -> Callable[[ModuleMap], SerqVM]:
     def execute(modules: ModuleMap, *, debug_hook = None):
-        graph = ModuleGraph()
+        clear_graph(module_graph)
         vm = SerqVM(debug_hook=debug_hook)
 
         other_modules = []
@@ -32,9 +63,9 @@ def multimodule_executor() -> Callable[[ModuleMap], SerqVM]:
             if other_module_name == "main":
                 continue
 
-            other_modules.append(graph.load(other_module_name, other_module_code))
+            other_modules.append(module_graph.load(other_module_name, other_module_code))
 
-        main_module = graph.load("main", file_contents=modules["main"])
+        main_module = module_graph.load("main", file_contents=modules["main"])
         vm.execute_module(main_module)
         return vm
     
@@ -87,4 +118,6 @@ def multimodule_capture_first_debug(multimodule_executor) -> Callable[[ModuleMap
         return captured
 
     return execute_and_capture
+
+
 

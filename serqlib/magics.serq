@@ -1,0 +1,25 @@
+// Defines symbols that cannot be represented in pure serq code
+
+
+
+// Types
+
+@magic pub struct int8 {}
+@magic pub struct uint8 {}
+@magic pub struct int16 {}
+@magic pub struct uint16 {}
+@magic pub struct int32 {}
+@magic pub struct uint32 {}
+@magic pub struct int64 {}
+@magic pub struct uint64 {}
+
+@magic pub struct float32 {}
+@magic pub struct float64 {}
+
+@magic pub struct bool {}
+
+@magic pub struct string {}
+
+
+
+// Functions
