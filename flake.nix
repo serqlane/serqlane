@@ -33,7 +33,7 @@
           format = "pyproject";
           pythonImportsCheck = [packageName];
           nativeBuildInputs = [python.pkgs.poetry-core];
-          nativeCheckInputs = [python.pkgs.pytestCheckHook];
+          nativeCheckInputs = with python.pkgs; [pytestCheckHook hypothesis];
 
           meta.mainProgram = packageName;
         };
