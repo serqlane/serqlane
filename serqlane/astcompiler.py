@@ -990,6 +990,8 @@ class CompCtx:
             # TODO: Get rid of check here once shadow syms are in
             assert expected_type.types_compatible(result.children[-1].type), f"Expected type {expected_type.sym.render()} for block but got {result.children[-1].type.sym.render()}"
             result.type = result.children[-1].type
+        
+        # NOTE: this code is never run
         elif len(result.children) > 0:
             result.add(self.statement(last_child, None))
             result.type = result.children[-1].type
@@ -1007,6 +1009,8 @@ class CompCtx:
         if len(tree.children) > 0:
             value = conv_fn(tree.children[0].value)
         
+        # NOTE: currently this code isn't run with the new parser
+        #  because it adds a Token with a value of ""
         # empty literals i.e. "" or []
         else:
             # match so it's easy to add new ones
@@ -1066,7 +1070,7 @@ class CompCtx:
             lhs_lit = isinstance(lhs, NodeLiteral)
             rhs_lit = isinstance(rhs, NodeLiteral)
             both_lit = lhs_lit and rhs_lit
-            if both_lit and type(lhs_lit) != type(rhs_lit):
+            if both_lit and type(lhs) != type(rhs):
                 raise ValueError("Incompatible literal node types")
 
             # TODO: Dot expr
