@@ -2,7 +2,6 @@
 @magic
 pub fn compiles(code: string) -> bool
 
-
 pub fn assert(cond: bool, message: string) {
     if cond {}
     else {
@@ -26,3 +25,4 @@ pub fn assert_not(cond: bool, message: string) {
 pub fn assert_not(cond: bool) {
     assert_not(cond, "Assertion failed")
 }
+
