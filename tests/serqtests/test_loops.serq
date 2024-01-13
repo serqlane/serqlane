@@ -1,0 +1,38 @@
+from std/debug import *
+
+
+// while
+{
+    let mut x = 10
+    while x > 0 {
+        x = x - 1
+    }
+    assert(x == 0)
+}
+
+
+// break
+{
+    let mut x = 10
+    while x > 0 {
+        x = x - 1
+        if x == 5 {
+            break
+        }
+    }
+    assert(x == 5)
+}
+
+
+// continue
+{
+    let mut x = 3
+    while x > 0 {
+        x = x - 1
+        if x == 2 {
+            continue
+        }
+        x = x - 1
+    }
+    assert(x == 0)
+}

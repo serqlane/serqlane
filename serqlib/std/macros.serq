@@ -1,0 +1,10 @@
+
+@magic
+pub fn compiles(code: string) -> bool
+
+
+@magic
+pub fn render_ast(node: string) -> string
+
+@magic
+pub fn render_ast_pretty(node: string) -> string

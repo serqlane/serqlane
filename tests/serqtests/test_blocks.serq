@@ -1,0 +1,20 @@
+from std/debug import *
+
+
+// mut block
+{
+    let mut i = 1
+    {
+        i = i + i
+    }
+    assert(i == 2)
+}
+
+
+// block expression
+{
+    let x = {
+        1 + 1
+    }
+    assert(x == 2)
+}
