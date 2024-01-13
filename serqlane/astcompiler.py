@@ -366,7 +366,7 @@ class SymbolKind(Enum):
 
 # TODO: Give every symbol a generation. Deferred function bodies should not be able to look up globals defined after themselves
 class Symbol:
-    def __init__(self, id: str, name: str, type: Type = None, mutable: bool = False, magic=False) -> None:
+    def __init__(self, id: str, name: str, type: Type = None, mutable: bool = False, magic=False, *, source_module: Optional[Module]) -> None:
         # TODO: Should store the source node, symbol kinds
         self.id = id
         self.name = name
@@ -375,6 +375,12 @@ class Symbol:
         self.mutable = mutable
         self.definition_node: Node = None
         self.magic = magic
+        self._source_module = source_module
+
+    def comes_from_module(self, module: Module):
+        if self._source_module == None:
+            return True
+        return module == self._source_module
 
     def qualified_name(self):
         return self.name + self.id
@@ -630,7 +636,7 @@ class Type:
 
 
 class Scope:
-    def __init__(self, graph: ModuleGraph, module: Optional[Module] = None) -> None:
+    def __init__(self, graph: ModuleGraph, module: Optional[Module]) -> None:
         self._local_syms: list[Symbol] = []
         self.module_graph = graph # TODO: Get rid of builtin hack
         self.module = module
@@ -762,7 +768,7 @@ class Scope:
         assert type(name) == str
         if checked and self.lookup(name, shallow=shallow): raise ValueError(f"redefinition of {name}")
 
-        result = Symbol(self.module_graph.sym_id_gen.next(), name=name)
+        result = Symbol(self.module_graph.sym_id_gen.next(), name=name, source_module=self.module)
         self.inject(result)
         return result
     
@@ -778,7 +784,7 @@ class Scope:
     def put_magic(self, name: str) -> Symbol:
         assert type(name) == str
         if self.lookup(name, shallow=True): raise SerqInternalError(f"redefinition of magic sym: {name}")
-        result = Symbol(self.module_graph.sym_id_gen.next(), name=name, magic=True)
+        result = Symbol(self.module_graph.sym_id_gen.next(), name=name, magic=True, source_module=self.module)
         self._local_syms.append(result)
         return result
 
@@ -805,12 +811,12 @@ class Scope:
         return sym
 
     def make_child(self) -> Scope:
-        res = Scope(self.module_graph)
+        res = Scope(self.module_graph, module=self.module)
         res.parent = self
         return res
 
     def make_sibling(self) -> Scope:
-        res = Scope(self.module_graph)
+        res = Scope(self.module_graph, module=self.module)
         res.parent = self.parent
         res.older_sibling = self
         return res
@@ -1213,6 +1219,8 @@ class CompCtx:
                         matching_field_sym = None
                         # TODO: Do a scope-esque lookup instead. Things like inheritance may silently add more things later
                         for field in lhs.type.sym.definition_node.fields:
+                            if not (field.sym.public or field.sym.comes_from_module(self.module)):
+                                continue
                             if field.sym.name == rhs:
                                 matching_field_sym = field.sym
                                 break
@@ -1388,11 +1396,13 @@ class CompCtx:
         assert tree.data == "struct_field", tree.data
         assert expected_type.kind == TypeKind.unit
 
-        ident = tree.children[0].children[0].value
+        is_public = tree.children[0] != None
+        ident = tree.children[1].children[0].value
         sym = self.current_scope.put_let(ident, checked=True, shallow=True)
+        sym.public = is_public
 
         # TODO: Assert that this is actually a type sym. Current system isn't ready yet
-        typ_sym_node = self.user_type(tree.children[1])
+        typ_sym_node = self.user_type(tree.children[2])
 
         sym.type = typ_sym_node.type
 
@@ -1647,7 +1657,7 @@ class Module:
         self.graph = graph
 
         self.name = name
-        self.global_scope = Scope(graph)
+        self.global_scope = Scope(graph, module=self)
         self.id = id
         self.hash = hashlib.md5(contents.encode()).digest()
         self.mod_tree = SerqParser(raw_data=contents).parse()#self.graph.serq_parser.parse(contents, display=False)
@@ -1678,13 +1688,13 @@ class ModuleGraph:
         self._next_id = 0 # TODO: Generate in a smarter way
         self.sym_id_gen = IdGen()
 
-        self.builtin_scope = Scope(self) # TODO: Remove
+        self.builtin_scope = Scope(self, module=None) # TODO: Remove
 
         # For now, unit is special because it's overused
         unit_type_sym = self.builtin_scope.put_builtin_type(TypeKind.unit)
 
         # TODO: hack
-        magic_sym = Symbol("-1", "magic")
+        magic_sym = Symbol("-1", "magic", source_module=None)
         magic_type = Type(TypeKind.magic, magic_sym)
         magic_sym.type = magic_type
 
@@ -1698,7 +1708,7 @@ class ModuleGraph:
         mod = Module(name, self._next_id, file_contents, self)
 
         # TODO: Proper sym generation
-        mod_sym = Symbol(":module:" + str(self._next_id), name, None)
+        mod_sym = Symbol(":module:" + str(self._next_id), name, None, source_module=None)
         mod_type = Type(TypeKind.module, mod_sym, data=mod)
         mod_sym.type = mod_type
         mod.sym = mod_sym
