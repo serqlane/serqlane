@@ -14,7 +14,7 @@ from serqlane.common import SerqInternalError
 
 DEBUG = False
 
-MAGIC_MODULE_NAME = "magics"
+MAGIC_MODULE_NAME = "serqlib/magics"
 
 
 RESERVED_KEYWORDS = [
@@ -60,6 +60,14 @@ class NodeSymbol(Node):
 
     def render(self) -> str:
         # TODO: Unique global identifier later
+        return f"{self.symbol.render()}"
+
+class NodeModuleSymbol(Node):
+    def __init__(self, symbol: Symbol, type: Type) -> None:
+        super().__init__(type)
+        self.symbol = symbol
+
+    def render(self) -> str:
         return f"{self.symbol.render()}"
 
 class NodeOptions(Node):
@@ -333,26 +341,28 @@ class NodeFnCall(Node):
         return f"{self.original_callee.render()}({args})"
 
 class NodeImport(Node):
-    def __init__(self, module_sym: Symbol, type: Type) -> None:
+    def __init__(self, module_sym: Symbol, orig_path: str, type: Type) -> None:
         super().__init__(type)
         self.module_sym = module_sym
+        self.orig_path = orig_path
 
     def render(self) -> str:
-        return f"import {self.module_sym.render()}"
+        return f"import {self.orig_path}"
 
 class NodeFromImport(Node):
-    def __init__(self, module_sym: Symbol, to_import: list[NodeOptions], type: Type, *, wildcard=False) -> None:
+    def __init__(self, module_sym: Symbol, to_import: list[NodeOptions], orig_path: str, type: Type, *, wildcard=False) -> None:
         super().__init__(type)
         self.module_sym = module_sym
         self.to_import = to_import
         self.wildcard = wildcard
+        self.orig_path = orig_path
 
     def render(self) -> str:
         if self.wildcard:
-            return f"from {self.module_sym.render()} import *"
+            return f"from {self.orig_path} import *"
         else:
             names = ", ".join([x.render() for x in self.to_import])
-            return f"from {self.module_sym.render()} import [{names}]"
+            return f"from {self.orig_path} import [{names}]"
 
 
 # TODO: Use these, will make later analysis easier
@@ -440,6 +450,7 @@ class TypeKind(Enum):
     type = auto() # TODO: magic that holds a type itself, not yet in grammar
 
     module = auto() # Comes from imports: `import x` -> x is a sym of type module
+    namespace = auto() # Comes from imports: `import a.b` -> `a` is a namespace and `b` is a module inside of `a`
 
 int_types = frozenset([
     TypeKind.int8,
@@ -679,12 +690,30 @@ class Scope:
                 return True
         return False
 
+    def _inject_import_namespaces(self, path: str, module_sym: Symbol):
+        if path == MAGIC_MODULE_NAME:
+            return
+        parts = path.split("/")
+        if parts[0].startswith("."):
+            parts = parts[1:]
+
+        if len(parts) == 1:
+            self.get_oldest_sibling().inject(module_sym)
+        else:
+            if len(parts) == 0:
+                raise SerqInternalError("Tried importing an empty path")
+            ns = self.put_namespace(parts[0])
+            for i in range(1, len(parts) - 1):
+                ns = ns.type.data.put_namespace(parts[i])
+            ns.type.data.inject(module_sym)
+
     # TODO: Add a check to prevent conflicts
     def do_basic_import(self, node: NodeImport):
         self._imported_modules.add(node.module_sym.type.data)
-        self.get_oldest_sibling().inject(node.module_sym)
+        self._inject_import_namespaces(node.orig_path, node.module_sym)
 
     def do_from_import(self, node: NodeFromImport):
+        # TODO: Replicate namespace logic from above!!!
         if node.wildcard:
             syms = list(node.module_sym.type.data.global_scope.iter_syms(only_public=True, include_magics=False, include_imports=False))
             self._imported_syms[node.module_sym.type.data] = syms
@@ -696,6 +725,7 @@ class Scope:
                         raise ValueError("Tried to import a non-symbol")
                     syms.append(option.symbol)
             self._imported_syms[node.module_sym.type.data] = syms
+        self._inject_import_namespaces(node.orig_path, node.module_sym)
 
     def _iter_syms_impl(self, shallow=False, *, include_magics=True, include_imports=False) -> Iterator[Symbol]:
         # prefer magics
@@ -722,7 +752,6 @@ class Scope:
         if include_imports:
             oldest = older if older != None else self
             for mod, syms in oldest._imported_syms.items():
-                yield mod.sym
                 for sym in syms:
                     yield sym
 
@@ -808,6 +837,18 @@ class Scope:
     def put_let(self, name: str, mutable=False, checked=True, shallow=False) -> Symbol:
         sym = self.put(name, checked=checked, shallow=shallow)
         sym.mutable = mutable
+        return sym
+
+    def put_namespace(self, name: str) -> Symbol:
+        existing: Optional[Symbol] = None
+        for s in self.iter_syms(name, include_magics=False):
+            if s.type.kind == TypeKind.namespace:
+                existing = s
+        if existing != None:
+            return existing
+
+        sym = self.put(name)
+        sym.type = Type(kind=TypeKind.namespace, sym=sym, data=Scope(graph=self.module_graph, module=self.module))
         return sym
 
     def make_child(self) -> Scope:
@@ -907,6 +948,7 @@ class CompCtx:
         res = NodeFromImport(
             module_sym=module.sym,
             to_import=to_import,
+            orig_path=import_path,
             type=self.get_unit_type(),
             wildcard=wildcard
         )
@@ -914,7 +956,7 @@ class CompCtx:
         return res
 
     def handle_from_import(self, tree: Tree, *, wildcard: bool) -> NodeFromImport:
-        import_path = tree.children[0].children[0].value
+        import_path = tree.children[0].value
         names = []
         if not wildcard and tree.children[1] != None:
             for ident_node in tree.children[1].children:
@@ -924,9 +966,9 @@ class CompCtx:
 
     def handle_import(self, tree: Tree):
         # TODO: More complex handling. Doing it like this has millions of issues, but good enough for first prototype
-        import_path = tree.children[0].children[0].value
+        import_path = tree.children[0].value
         module = self.graph.request_module(import_path)
-        res = NodeImport(module.sym, self.get_unit_type())
+        res = NodeImport(module.sym, orig_path=import_path, type=self.get_unit_type())
         self.current_scope.do_basic_import(res)
         return res
 
@@ -958,9 +1000,11 @@ class CompCtx:
 
     def if_stmt(self, tree: Tree, expected_type: Type) -> NodeIfStmt:
         assert tree.data == "if_stmt", tree.data
-        assert expected_type.kind == TypeKind.unit # TODO: if expressions are not unit, need to guarantee valid else branch
+        assert expected_type.kind in [TypeKind.unit, TypeKind.infer] # TODO: if expressions are not unit, need to guarantee valid else branch
         # Same scoping story as in while_stmt
         if_cond = self.expression(tree.children[0], self.current_scope.lookup_type("bool", shallow=True))
+        if isinstance(if_cond, NodeOptions):
+            if_cond = if_cond.extract_unambiguous()
         assert if_cond.type.kind == TypeKind.bool
         if_body = self.handle_block(tree.children[1], self.get_unit_type())
 
@@ -1228,7 +1272,6 @@ class CompCtx:
 
                         return NodeDotAccess(lhs, matching_field_sym)
                     case TypeKind.module:
-                        assert isinstance(lhs, NodeSymbol)
                         assert isinstance(lhs.type.data, Module)
                         options = NodeOptions(self.get_unit_type())
                         for sym in lhs.type.data.global_scope.iter_syms(name=rhs, shallow=True, only_public=True, include_magics=False):
@@ -1237,6 +1280,11 @@ class CompCtx:
                         if len(options.options) < 1:
                             raise ValueError(f"Could not find {rhs} in module {lhs.render()}")
                         return NodeDotAccess(lhs, options)
+                    case TypeKind.namespace:
+                        syms = list(lhs.type.data.iter_syms(name=rhs, include_magics=False))
+                        if len(syms) != 1:
+                            raise ValueError(f"Unable to find {rhs} in {lhs.render()}")
+                        return NodeDotAccess(lhs, NodeSymbol(syms[0], syms[0].type))
                     case _:
                         raise SerqInternalError(f"Dot operations for type kind `{lhs.type.kind.name}` are not yet allowed")
             case _:
@@ -1684,7 +1732,7 @@ class IdGen:
 
 class ModuleGraph:
     def __init__(self) -> None:
-        self.modules: dict[str, Module] = {} # TODO: Detect duplicates based on hash, reduce workload
+        self.modules: dict[pathlib.Path, Module] = {} # TODO: Detect duplicates based on hash, reduce workload
         self._next_id = 0 # TODO: Generate in a smarter way
         self.sym_id_gen = IdGen()
 
@@ -1702,9 +1750,17 @@ class ModuleGraph:
         dbg_sym = self.builtin_scope.put_magic_function("dbg", dbg_sym_type)
         dbg_sym_type.sym = dbg_sym
 
+        panic_sym_type = Type(TypeKind.function, None, ([], unit_type_sym.type))
+        panic_sym = self.builtin_scope.put_magic_function("panic", panic_sym_type)
+        panic_sym_type.sym = panic_sym
 
-    def load(self, name: str, file_contents: str) -> Module:
-        assert name not in self.modules
+
+    def load(self, path: str | pathlib.Path, file_contents: str) -> Module:
+        if isinstance(path, str):
+            path = pathlib.Path(path + ".serq").absolute()
+        name = path.with_suffix("").name
+        
+        assert path not in self.modules
         mod = Module(name, self._next_id, file_contents, self)
 
         # TODO: Proper sym generation
@@ -1714,7 +1770,7 @@ class ModuleGraph:
         mod.sym = mod_sym
 
         self._next_id += 1
-        self.modules[name] = mod
+        self.modules[path] = mod
         # TODO: Make sure the module isn't already being processed
         ctx = CompCtx(mod, self)
         ast: NodeStmtList = ctx.start(mod.mod_tree)
@@ -1736,9 +1792,15 @@ class ModuleGraph:
         return mod
 
     def request_module(self, name: str) -> Optional[Module]:
-        if name in self.modules:
-            return self.modules[name]
-        elif pathlib.Path(name + ".serq").is_file():
-            return self.load(name, pathlib.Path(name + ".serq").read_text())
+        orig_name = name
+        is_std_import = name.startswith("std/")
+        if is_std_import:
+            name = "./serqlib/std/" + name[4:]
+        path = pathlib.Path(name + ".serq").absolute()
+
+        if path in self.modules:
+            return self.modules[path]
+        elif path.is_file():
+            return self.load(name, path.read_text())
         else:
-            raise ValueError(f"Unable to find import: {name}")
+            raise ValueError(f"Unable to find import: {orig_name}")

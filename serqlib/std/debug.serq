@@ -1,0 +1,12 @@
+
+pub fn assert(cond: bool, message: string) {
+    if cond {}
+    else {
+        dbg(message)
+        panic()
+    }
+}
+
+pub fn assert(cond: bool) {
+    assert(cond, "Assertion failed")
+}

@@ -14,6 +14,10 @@ class SerqVMError(Exception):
     ...
 
 
+class PanicError(SerqVMError):
+    ...
+
+
 class ContinueError(SerqVMError):
     ...
 
@@ -193,6 +197,9 @@ class SerqVM:
                     else:
                         self.debug_hook(val)
                     return Unit()
+                
+                elif expression.callee.symbol.name == "panic": # type: ignore
+                     raise PanicError()
 
                 # TODO: handle passing args to constructor
                 elif isinstance(
