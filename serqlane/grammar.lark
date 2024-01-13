@@ -14,7 +14,7 @@ import_all_from_stmt: "from" identifier "import" "*"
 
 // TODO: generics for both types and functions
 struct_definition: [decorator] [pub_marker] "struct" identifier "{" [struct_field (_TERMINATOR struct_field)*] "}"
-struct_field: identifier user_type // TODO: default values
+struct_field: [pub_marker] identifier user_type // TODO: default values
 
 // rust terminology, wrong
 enum_definition: "enum" identifier "{" [enum_field ((_TERMINATOR | ",") enum_field)*] "}"

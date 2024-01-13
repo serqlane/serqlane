@@ -344,9 +344,13 @@ class SerqParser:
         field_list: list[Tree] = []
         cursor = self.peek(0)
         while cursor.kind != SqTokenKind.CLOSE_CURLY:
+            field_pub: Optional[Tree] = None
+            if self.peek(0).kind == SqTokenKind.PUB:
+                self.advance()
+                field_pub = Tree("PUB", children=[Token("PUB", "pub")])
             field_ident = self._eat_identifier()
             field_type = self._eat_user_type()
-            field_list.append(Tree("struct_field", children=[field_ident, field_type]))
+            field_list.append(Tree("struct_field", children=[field_pub, field_ident, field_type]))
             cursor = self.peek(0)
         if len(field_list) == 0:
             result.add(None)

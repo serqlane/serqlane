@@ -87,7 +87,7 @@ SERQ_TO_C_TYPE = {
     TypeKind.float32: ctypes.c_float,
     TypeKind.float64: ctypes.c_double,
     # TODO: what type is expected here?
-    #TypeKind.pointer: ctypes.c_void_p,
+    # TypeKind.pointer: ctypes.c_void_p,
 }
 
 
@@ -113,7 +113,9 @@ class SerqVM:
                         # TODO: lookup other structs
                         type = SERQ_TO_C_TYPE[field.type.kind]
                     except KeyError:
-                        raise NotImplementedError(f"field of type {field.type.kind} not implemented")
+                        raise NotImplementedError(
+                            f"field of type {field.type.kind} not implemented"
+                        )
 
             fields.append((field_name, type))
 
@@ -191,11 +193,27 @@ class SerqVM:
                     else:
                         self.debug_hook(val)
                     return Unit()
-                
+
                 # TODO: handle passing args to constructor
-                elif isinstance(expression.callee.symbol.definition_node, NodeStructDefinition):  # type: ignore
+                elif isinstance(
+                    expression.callee.symbol.definition_node, # type: ignore
+                    NodeStructDefinition
+                ):  
                     assert isinstance(expression.callee, NodeSymbol)
-                    struct = self.get_value_on_stack(expression.callee.symbol)
+
+                    try:
+                        struct = self.get_value_on_stack(expression.callee.symbol)
+                    except KeyError:
+                        definition_node = expression.callee.symbol.definition_node
+
+                        struct = self.construct_serq_struct(
+                            definition_node
+                        )
+
+                        self.push_value_on_stack(
+                            definition_node.sym, struct
+                        )
+
                     # this is a ctypes.Structure type
                     return struct()
 
@@ -293,10 +311,16 @@ class SerqVM:
                     )
 
                 case NodeAssignment():
-                    assert isinstance(child.lhs, (NodeSymbol, NodeDotAccess)), f"{type(child.lhs)=}"
+                    assert isinstance(
+                        child.lhs, (NodeSymbol, NodeDotAccess)
+                    ), f"{type(child.lhs)=}"
 
                     if isinstance(child.lhs, NodeDotAccess):
-                        setattr(self.eval(child.lhs.lhs), child.lhs.rhs.qualified_name(), self.eval(child.rhs))
+                        setattr(
+                            self.eval(child.lhs.lhs),
+                            child.lhs.rhs.qualified_name(),
+                            self.eval(child.rhs),
+                        )
                     else:
                         self.set_value_on_stack(child.lhs.symbol, self.eval(child.rhs))
 
@@ -333,7 +357,7 @@ class SerqVM:
                     else:
                         return_value = self.execute_node(child.else_body)
 
-                case NodeFnDefinition() | NodeImport() | NodeFromImport(): # TODO: NodeImport must be handled differently. It may set up its own types
+                case NodeFnDefinition() | NodeImport() | NodeFromImport():  # TODO: NodeImport must be handled differently. It may set up its own types
                     pass  # nop
 
                 case NodeFnCall():
@@ -345,13 +369,15 @@ class SerqVM:
                     raise ReturnError(return_value)
 
                 case NodeStructDefinition():
-                    self.push_value_on_stack(child.sym, self.construct_serq_struct(child))
+                    self.push_value_on_stack(
+                        child.sym, self.construct_serq_struct(child)
+                    )
 
                 case _:
                     # assume expression
                     return_value = self.eval(child)
 
-            #logger.debug(f"{self.stack=}")
+            # logger.debug(f"{self.stack=}")
 
         return return_value
 
