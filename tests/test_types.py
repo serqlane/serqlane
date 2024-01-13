@@ -9,6 +9,11 @@ def test_invalid_cohersion(executor):
         executor('let x: int64 = "abc"')
 
 
+def test_unit_let(executor):
+    with pytest.raises(ValueError):
+        executor("let x = {let y = 1}")
+
+
 def test_floating_function_return_type(executor):
     with pytest.raises(AssertionError):
         executor(
@@ -24,21 +29,21 @@ let x = add(1, 1)
 
 
 BAD_STRUCT_TYPE_INFERENCE = [
-"""
+    """
 struct A {
     x: int32
 }
 
 let w: float64 = A().x
 """,
-"""
+    """
 struct A {
     x: int32
 }
 
 let w = A()
 let q = w.x + "def"
-"""
+""",
 ]
 
 
@@ -49,21 +54,21 @@ def test_bad_struct_type_inference(executor, code):
 
 
 GOOD_STRUCT_TYPE_INFERENCE = [
-"""
+    """
 struct A {
     x: int32
 }
 
 let w: int32 = A().x
 """,
-"""
+    """
 struct A {
     x: int32
 }
 
 let w = A()
 let q = w.x + 2
-"""
+""",
 ]
 
 

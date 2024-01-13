@@ -190,3 +190,7 @@ def test_forward_calls_failing(executor, code):
     with pytest.raises(ValueError):
         executor(code)
 
+
+def test_redefinition_fails(executor):
+    with pytest.raises(ValueError):
+        executor("fn a() {}\nfn a() {}")
