@@ -3,6 +3,7 @@ from __future__ import annotations
 from enum import Enum, auto
 from typing import Any, Optional, Iterator
 
+import copy
 import pathlib
 import hashlib
 import textwrap
@@ -1657,14 +1658,14 @@ class CompCtx:
                         if not isinstance(code, NodeStringLit):
                             raise ValueError("Tried checking if a non-literal string compiles")
                         compiles = True
-                        self.open_scope()
+                        cur_scope = copy.deepcopy(self.current_scope)
                         try:
                             parser = SerqParser(code.value)
                             parsed = parser.parse()
                             self.statement(parsed.children[0], self.get_infer_type())
                         except ValueError:
                             compiles = False
-                        self.close_scope()
+                        self.current_scope = cur_scope
                         return NodeBoolLit(compiles, Type(TypeKind.literal_bool, sym=None))
                     case _:
                         pass

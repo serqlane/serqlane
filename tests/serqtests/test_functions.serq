@@ -1,0 +1,146 @@
+from std/debug import *
+
+
+// return tests
+{
+    alias int = int64
+
+    fn add(a: int, b: int) -> int {
+        return a + b
+    }
+
+    let x = add(1, 1)
+    assert(x == 2)
+}
+{
+    alias int = int64
+    fn add(a: int, b: int) -> int {
+        a + b
+    }
+
+    let x = add(1, 1)
+    assert(x == 2)
+}
+
+
+// variable shadowing
+{
+    alias int = int64
+    
+    let x = 1
+
+    fn foo(x: int) -> int {
+        return x
+    }
+
+    foo(20)
+    assert(x == 1)
+}
+
+
+// recursive function
+{
+    alias int = int64
+
+    fn add_one(x: int) -> int {
+        if x == 1 {
+            // should give us 4
+            return add_one(x + 1) + 1
+        }
+
+        x + 1
+    }
+
+    let w = add_one(1)
+    assert(w == 4)
+}
+
+
+// function empty args
+{
+    fn abc() {
+        return
+    }
+    abc()
+}
+
+
+// function call symbol
+{
+    assert_not(compiles("true()"))
+}
+
+
+// overload tests
+{
+    fn abc(a: int64) -> int64 {
+        a
+    }
+
+    fn abc(a: string) -> string {
+        a
+    }
+
+    assert(abc(1) == 1)
+}
+{
+    alias int = int64
+
+    fn abc() -> int {
+        1
+    }
+
+    fn abc(a: int) -> int {
+        a
+    }
+
+    assert(abc() == 1)
+}
+{
+    alias int = int64
+
+    fn abc(a: int) -> int {
+        a
+    }
+
+    fn abc(a: int, b: string) -> int {
+        a
+    }
+
+    assert(abc(1) == 1)
+}
+
+
+// forward calls tests passing
+{
+    fn a() -> int64 {
+        b()
+    }
+    
+    fn b() -> int64 {
+        1
+    }
+
+    assert(a() == 1)
+}
+{
+    fn foo() -> int32 {
+        bar(10)
+    }
+
+    fn bar(a: int32) -> int32 {
+        a
+    }
+
+    assert(foo() == 10)
+}
+
+
+// forward calls tests failing
+{
+    fn a() {}
+
+    assert_not(compiles("b()"))
+
+    fn b() {}
+}
