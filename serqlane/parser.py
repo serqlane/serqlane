@@ -381,14 +381,42 @@ class SerqParser:
             result.add(None)
         return result
     
+    def _eat_import_path(self) -> Token:
+        result = Token("import_path", value="")
+
+        valid_kinds = [SqTokenKind.IDENTIFIER, SqTokenKind.DOTDOT, SqTokenKind.DOT, SqTokenKind.SLASH]
+        cursor = self.expect(valid_kinds)
+        while True:
+            match cursor.kind:
+                case SqTokenKind.IDENTIFIER:
+                    result.value += cursor.literal
+                    valid_kinds = [SqTokenKind.SLASH]
+                case SqTokenKind.SLASH:
+                    result.value += "/"
+                    valid_kinds = [SqTokenKind.IDENTIFIER]
+                case SqTokenKind.DOT:
+                    result.value += "."
+                    valid_kinds = [SqTokenKind.SLASH]
+                case SqTokenKind.DOTDOT:
+                    self.expect([SqTokenKind.SLASH])
+                    result.value += "../"
+                    valid_kinds = [SqTokenKind.IDENTIFIER]
+                case _:
+                    raise NotImplementedError(cursor.kind)
+            cursor = self.peek(0)
+            if cursor.kind not in valid_kinds:
+                break
+            self.advance()
+        return result
+
     def _eat_import(self) -> Tree:
         self.expect([SqTokenKind.IMPORT])
-        result = Tree("import_stmt", children=[self._eat_identifier()])
+        result = Tree("import_stmt", children=[self._eat_import_path()])
         return result
 
     def _eat_from_import(self) -> Tree:
         self.expect([SqTokenKind.FROM])
-        module_ident = self._eat_identifier()
+        module_ident = self._eat_import_path()
         self.expect([SqTokenKind.IMPORT])
         cursor = self.expect([SqTokenKind.OPEN_SQUARE, SqTokenKind.STAR])
         if cursor.kind == SqTokenKind.OPEN_SQUARE:
