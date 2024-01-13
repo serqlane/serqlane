@@ -9,6 +9,30 @@ from serqlane.astcompiler import ModuleGraph, Module
 type ModuleMap = dict[str, str]
 
 
+# https://docs.pytest.org/en/latest/example/simple.html#control-skipping-of-tests-according-to-command-line-option
+def pytest_addoption(parser: pytest.Parser):
+    parser.addoption("--fuzz", action="store_true", default=False, help="run fuzzer")
+
+
+def pytest_configure(config: pytest.Config):
+    config.addinivalue_line(
+        "markers", "fuzz: fuzz tests"
+    )
+
+
+def pytest_collection_modifyitems(
+        session: pytest.Session,
+        config: pytest.Config,
+        items: list[pytest.Item],
+    ):
+    if config.getoption("--fuzz"):
+        return
+    skip_fuzz = pytest.mark.skip(reason="need --fuzz option to run")
+    for item in items:
+        if "fuzz" in item.keywords:
+            item.add_marker(skip_fuzz)
+
+
 @pytest.fixture(scope="session")
 def module_graph() -> ModuleGraph:
     graph = ModuleGraph()
@@ -115,6 +139,3 @@ def multimodule_capture_first_debug(multimodule_executor) -> Callable[[ModuleMap
         return captured
 
     return execute_and_capture
-
-
-
