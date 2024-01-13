@@ -23,3 +23,5 @@
 
 
 // Functions
+
+@magic pub fn panic()

@@ -321,7 +321,10 @@ class SerqParser:
     
     def _eat_function_definition(self) -> Tree:
         self.expect([SqTokenKind.FN])
-        result = Tree("fn_definition", children=[self._cur_pub])
+        result = Tree("fn_definition", children=[self._cur_decorator, self._cur_pub])
+        is_magic = self._cur_decorator != None and self._cur_decorator.children[0].children[0].value == "magic"
+        #is_magic = self._cur_decorator.
+        self._cur_decorator = None
         self._cur_pub = None
         result.add(self._eat_identifier())
         result.add(self._eat_function_definition_args())
@@ -329,7 +332,10 @@ class SerqParser:
         if self.peek(0).kind == SqTokenKind.ARROW:
             ret_type = self._eat_return_user_type()
         result.add(ret_type)
-        result.add(self._handle_block(include_open=True))
+        if is_magic:
+            result.add(None)
+        else:
+            result.add(self._handle_block(include_open=True))
         return result
 
     def _eat_struct(self) -> Tree:

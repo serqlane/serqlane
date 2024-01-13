@@ -1540,20 +1540,20 @@ class CompCtx:
         assert tree.data == "fn_definition", tree.data
         assert expected_type.kind == TypeKind.unit
 
-        public = tree.children[0] != None
+        public = tree.children[1] != None
 
-        ident_node = tree.children[1]
+        ident_node = tree.children[2]
         assert ident_node.data == "identifier"
         ident = ident_node.children[0].value
 
         # must open a scope here to isolate the params
         self.open_scope()
         
-        args_node = self.fn_definition_args(tree.children[2], self.get_unit_type())
+        args_node = self.fn_definition_args(tree.children[3], self.get_unit_type())
         ret_type_node = NodeSymbol(self.get_unit_type().sym, self.get_unit_type())
         ret_type = ret_type_node.type
-        if tree.children[3] != None:
-            ret_type_node = self.user_type(tree.children[3])
+        if tree.children[4] != None:
+            ret_type_node = self.user_type(tree.children[4])
             ret_type = ret_type_node.type # TODO: Fix this nonsense, type should be `type`, not whatever the type evaluates to
 
         # TODO: Use a type cache to load function with the same type from it for easier matching
@@ -1568,8 +1568,11 @@ class CompCtx:
         sym.public = public
         fn_type.sym = sym
 
-        # TODO: Make this work for generics later
-        self.defer_fn_body(sym, tree.children[4])
+        if tree.children[0] == None or tree.children[0].children[0].children[0].value != "magic":
+            # TODO: Make this work for generics later
+            self.defer_fn_body(sym, tree.children[5])
+        else:
+            sym.magic = True
 
         # Order is important here. We want the sibling to be part of the body's parent to isolate the insides and create a one-way boundary
         self.close_scope()
@@ -1645,6 +1648,26 @@ class CompCtx:
         call = self.resolve_call(callee_node, tree.children[1].children if tree.children[1].children[0] != None else [])
         if call == None:
             raise ValueError(f"No matching overload found for {tree.children[0].children[0].children[0].value}")
+        if isinstance(call.callee, NodeSymbol):
+            callsym = call.callee.symbol
+            if callsym.magic:
+                match callsym.name:
+                    case "compiles":
+                        code = call.args[0]
+                        if not isinstance(code, NodeStringLit):
+                            raise ValueError("Tried checking if a non-literal string compiles")
+                        compiles = True
+                        self.open_scope()
+                        try:
+                            parser = SerqParser(code.value)
+                            parsed = parser.parse()
+                            self.statement(parsed.children[0], self.get_infer_type())
+                        except ValueError:
+                            compiles = False
+                        self.close_scope()
+                        return NodeBoolLit(compiles, Type(TypeKind.literal_bool, sym=None))
+                    case _:
+                        pass
         return call
 
     def expression(self, tree: Tree, expected_type: Type) -> Node:
@@ -1745,10 +1768,6 @@ class ModuleGraph:
         dbg_sym_type = Type(TypeKind.function, None, ([magic_type], unit_type_sym.type))
         dbg_sym = self.builtin_scope.put_magic_function("dbg", dbg_sym_type)
         dbg_sym_type.sym = dbg_sym
-
-        panic_sym_type = Type(TypeKind.function, None, ([], unit_type_sym.type))
-        panic_sym = self.builtin_scope.put_magic_function("panic", panic_sym_type)
-        panic_sym_type.sym = panic_sym
 
 
     def load(self, path: str | pathlib.Path, file_contents: str) -> Module:
