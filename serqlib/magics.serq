@@ -24,5 +24,7 @@
 
 // Functions
 
+@magic pub fn dbg(x: magic)
+
 @magic pub fn panic()
 

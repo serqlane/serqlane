@@ -199,7 +199,7 @@ class SerqVM:
                     return Unit()
                 
                 elif expression.callee.symbol.name == "panic": # type: ignore
-                     raise PanicError()
+                    raise PanicError()
 
                 # TODO: handle passing args to constructor
                 elif isinstance(

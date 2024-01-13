@@ -1,7 +1,4 @@
 
-@magic
-pub fn compiles(code: string) -> bool
-
 pub fn assert(cond: bool, message: string) {
     if cond {}
     else {

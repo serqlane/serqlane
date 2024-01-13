@@ -43,7 +43,7 @@ class Node:
         assert type != None and isinstance(type, Type), type
         self.type = type
 
-    def render(self) -> str:
+    def render(self, pretty=True) -> str:
         raise SerqInternalError(f"Render isn't implemented for node type {type(self)}")
 
 class NodeEmpty(Node):
@@ -51,7 +51,7 @@ class NodeEmpty(Node):
         assert type.kind == TypeKind.unit, "An empty node must have a unit type"
         super().__init__(type)
 
-    def render(self) -> str:
+    def render(self, pretty=True) -> str:
         return ""
 
 class NodeSymbol(Node):
@@ -59,17 +59,9 @@ class NodeSymbol(Node):
         super().__init__(type)
         self.symbol = symbol
 
-    def render(self) -> str:
+    def render(self, pretty=True) -> str:
         # TODO: Unique global identifier later
-        return f"{self.symbol.render()}"
-
-class NodeModuleSymbol(Node):
-    def __init__(self, symbol: Symbol, type: Type) -> None:
-        super().__init__(type)
-        self.symbol = symbol
-
-    def render(self) -> str:
-        return f"{self.symbol.render()}"
+        return f"{self.symbol.render(pretty=pretty)}"
 
 class NodeOptions(Node):
     def __init__(self, type: Type) -> None:
@@ -85,9 +77,9 @@ class NodeOptions(Node):
         assert len(self.options) > 0
         return self.options[0]
 
-    def render(self) -> str:
+    def render(self, pretty=True) -> str:
         # Just use the first sym, if this appears in the final ast that's a bug
-        return f"{self.options[0].render()}"
+        return f"{self.options[0].render(pretty=pretty)}"
 
 class NodeStmtList(Node):
     def __init__(self, type: Type) -> None:
@@ -97,18 +89,21 @@ class NodeStmtList(Node):
     def add(self, node: Node):
         self.children.append(node)
 
-    def render(self) -> str:
+    def render(self, pretty=True) -> str:
         result = []
         for child in self.children:
-            result.append(child.render())
-        return "\n".join(result)
+            result.append(child.render(pretty=pretty))
+        if pretty:
+            return "\n".join(result)
+        else:
+            return " ".join(result)
 
 class NodeLiteral[T](Node):
     def __init__(self, value: T, type: Type) -> None:
         super().__init__(type) # type either gets converted from literal to actual, gets turned into an error or gets inferred from lhs
         self.value = value
 
-    def render(self) -> str:
+    def render(self, pretty=True) -> str:
         return str(self.value)
 
 class NodeIntLit(NodeLiteral[int]): ...
@@ -116,11 +111,11 @@ class NodeIntLit(NodeLiteral[int]): ...
 class NodeFloatLit(NodeLiteral[float]): ...
 
 class NodeBoolLit(NodeLiteral[bool]):
-    def render(self) -> str:
+    def render(self, pretty=True) -> str:
         return str(self.value).lower()
 
 class NodeStringLit(NodeLiteral[str]):
-    def render(self) -> str:
+    def render(self, pretty=True) -> str:
         return f"\"{self.value}\""
 
 class NodeLet(Node):
@@ -129,9 +124,9 @@ class NodeLet(Node):
         self.sym_node = sym_node
         self.expr = expr
 
-    def render(self) -> str:
+    def render(self, pretty=True) -> str:
         is_mut = self.sym_node.symbol.mutable
-        return f"let {"mut " if is_mut else ""}{self.sym_node.render()}{": " + self.sym_node.type.sym.render()} = {self.expr.render()}"
+        return f"let {"mut " if is_mut else ""}{self.sym_node.render(pretty=pretty)}{": " + self.sym_node.type.sym.render(pretty=pretty)} = {self.expr.render(pretty=pretty)}"
 
 class NodeAssignment(Node):
     def __init__(self, lhs: Node, rhs: Node, type: Type) -> None:
@@ -139,8 +134,8 @@ class NodeAssignment(Node):
         self.lhs = lhs
         self.rhs = rhs
 
-    def render(self) -> str:
-        return f"{self.lhs.render()} = {self.rhs.render()}"
+    def render(self, pretty=True) -> str:
+        return f"{self.lhs.render(pretty=pretty)} = {self.rhs.render(pretty=pretty)}"
 
 
 class NodeGrouped(Node):
@@ -148,8 +143,8 @@ class NodeGrouped(Node):
         super().__init__(type)
         self.inner = inner
     
-    def render(self) -> str:
-        return f"({self.inner.render()})"
+    def render(self, pretty=True) -> str:
+        return f"({self.inner.render(pretty=pretty)})"
 
 
 class NodeBinaryExpr(Node):
@@ -161,59 +156,59 @@ class NodeBinaryExpr(Node):
 # TODO: These could be converted into (infix) functions to be stored as op(lhs, rhs) in reimpl
 # arith
 class NodePlusExpr(NodeBinaryExpr):
-    def render(self) -> str:
-        return f"({self.lhs.render()} + {self.rhs.render()})"
+    def render(self, pretty=True) -> str:
+        return f"({self.lhs.render(pretty=pretty)} + {self.rhs.render(pretty=pretty)})"
 
 class NodeMinusExpression(NodeBinaryExpr):
-    def render(self) -> str:
-        return f"({self.lhs.render()} - {self.rhs.render()})"
+    def render(self, pretty=True) -> str:
+        return f"({self.lhs.render(pretty=pretty)} - {self.rhs.render(pretty=pretty)})"
 
 class NodeMulExpression(NodeBinaryExpr):
-    def render(self) -> str:
-        return f"({self.lhs.render()} * {self.rhs.render()})"
+    def render(self, pretty=True) -> str:
+        return f"({self.lhs.render(pretty=pretty)} * {self.rhs.render(pretty=pretty)})"
 
 class NodeDivExpression(NodeBinaryExpr):
-    def render(self) -> str:
-        return f"({self.lhs.render()} / {self.rhs.render()})"
+    def render(self, pretty=True) -> str:
+        return f"({self.lhs.render(pretty=pretty)} / {self.rhs.render(pretty=pretty)})"
 
 # int only
 class NodeModExpression(NodeBinaryExpr):
-    def render(self) -> str:
-        return f"({self.lhs.render()} % {self.rhs.render()})"
+    def render(self, pretty=True) -> str:
+        return f"({self.lhs.render(pretty=pretty)} % {self.rhs.render(pretty=pretty)})"
 
 # logic
 class NodeAndExpression(NodeBinaryExpr):
-    def render(self) -> str:
-        return f"({self.lhs.render()} and {self.rhs.render()})"
+    def render(self, pretty=True) -> str:
+        return f"({self.lhs.render(pretty=pretty)} and {self.rhs.render(pretty=pretty)})"
 
 class NodeOrExpression(NodeBinaryExpr):
-    def render(self) -> str:
-        return f"({self.lhs.render()} or {self.rhs.render()})"
+    def render(self, pretty=True) -> str:
+        return f"({self.lhs.render(pretty=pretty)} or {self.rhs.render(pretty=pretty)})"
 
 # comparison
 class NodeEqualsExpression(NodeBinaryExpr):
-    def render(self) -> str:
-        return f"({self.lhs.render()} == {self.rhs.render()})"
+    def render(self, pretty=True) -> str:
+        return f"({self.lhs.render(pretty=pretty)} == {self.rhs.render(pretty=pretty)})"
 
 class NodeNotEqualsExpression(NodeBinaryExpr):
-    def render(self) -> str:
-        return f"({self.lhs.render()} != {self.rhs.render()})"
+    def render(self, pretty=True) -> str:
+        return f"({self.lhs.render(pretty=pretty)} != {self.rhs.render(pretty=pretty)})"
     
 class NodeLessExpression(NodeBinaryExpr):
-    def render(self) -> str:
-        return f"({self.lhs.render()} < {self.rhs.render()})"
+    def render(self, pretty=True) -> str:
+        return f"({self.lhs.render(pretty=pretty)} < {self.rhs.render(pretty=pretty)})"
 
 class NodeLessEqualsExpression(NodeBinaryExpr):
-    def render(self) -> str:
-        return f"({self.lhs.render()} <= {self.rhs.render()})"
+    def render(self, pretty=True) -> str:
+        return f"({self.lhs.render(pretty=pretty)} <= {self.rhs.render(pretty=pretty)})"
     
 class NodeGreaterExpression(NodeBinaryExpr):
-    def render(self) -> str:
-        return f"({self.lhs.render()} > {self.rhs.render()})"
+    def render(self, pretty=True) -> str:
+        return f"({self.lhs.render(pretty=pretty)} > {self.rhs.render(pretty=pretty)})"
 
 class NodeGreaterEqualsExpression(NodeBinaryExpr):
-    def render(self) -> str:
-        return f"({self.lhs.render()} >= {self.rhs.render()})"
+    def render(self, pretty=True) -> str:
+        return f"({self.lhs.render(pretty=pretty)} >= {self.rhs.render(pretty=pretty)})"
 
 class NodeDotAccess(Node):
     def __init__(self, lhs: Node, rhs: Symbol) -> None:
@@ -221,17 +216,17 @@ class NodeDotAccess(Node):
         self.lhs = lhs
         self.rhs = rhs
 
-    def render(self) -> str:
-        return f"{self.lhs.render()}.{self.rhs.render()}"
+    def render(self, pretty=True) -> str:
+        return f"{self.lhs.render(pretty=pretty)}.{self.rhs.render(pretty=pretty)}"
 
 
 # others
 class NodeBreak(Node):
-    def render(self) -> str:
+    def render(self, pretty=True) -> str:
         return "break"
 
 class NodeContinue(Node):
-    def render(self) -> str:
+    def render(self, pretty=True) -> str:
         return "continue"
 
 
@@ -239,9 +234,11 @@ class NodeBlockStmt(NodeStmtList):
     def __init__(self, type: Type) -> None:
         super().__init__(type)
 
-    def render(self) -> str:
-        inner = super().render()
-        return f"{{\n{textwrap.indent(inner, "  ")}\n}}"
+    def render(self, pretty=True) -> str:
+        inner = super().render(pretty=pretty)
+        if pretty:
+            return f"{{\n{textwrap.indent(inner, "  ")}\n}}"
+        return f"{{{inner}}}"
 
 class NodeWhileStmt(Node):
     def __init__(self, cond_expr: Node, body: NodeBlockStmt, type: Type) -> None:
@@ -249,9 +246,9 @@ class NodeWhileStmt(Node):
         self.cond_expr = cond_expr
         self.body = body
     
-    def render(self) -> str:
-        cond = self.cond_expr.render()
-        body = self.body.render()
+    def render(self, pretty=True) -> str:
+        cond = self.cond_expr.render(pretty=pretty)
+        body = self.body.render(pretty=pretty)
         return f"while ({cond}) {body}"
 
 class NodeIfStmt(Node):
@@ -261,10 +258,10 @@ class NodeIfStmt(Node):
         self.if_body = if_body
         self.else_body = else_body
 
-    def render(self) -> str:
-        cond = self.cond_expr.render()
-        if_body = self.if_body.render()
-        else_body = self.else_body.render()
+    def render(self, pretty=True) -> str:
+        cond = self.cond_expr.render(pretty=pretty)
+        if_body = self.if_body.render(pretty=pretty)
+        else_body = self.else_body.render(pretty=pretty)
         return f"if ({cond}) {if_body} else {else_body}"
 
 
@@ -273,8 +270,8 @@ class NodeReturn(Node):
         super().__init__(type)
         self.expr = expr
 
-    def render(self) -> str:
-        return f"return {self.expr.render()}"
+    def render(self, pretty=True) -> str:
+        return f"return {self.expr.render(pretty=pretty)}"
 
 class NodeAliasDefinition(Node):
     def __init__(self, sym: Symbol, src: Symbol, type: Type) -> None:
@@ -282,16 +279,16 @@ class NodeAliasDefinition(Node):
         self.sym = sym
         self.src = src
 
-    def render(self) -> str:
-        return f"alias {self.sym.render()} = {self.src.render()}"
+    def render(self, pretty=True) -> str:
+        return f"alias {self.sym.render(pretty=pretty)} = {self.src.render(pretty=pretty)}"
 
 class NodeStructField(Node):
     def __init__(self, sym: Symbol, typ: Type) -> None:
         super().__init__(typ)
         self.sym = sym
 
-    def render(self) -> str:
-        return f"{self.sym.render()}: {self.type.sym.render()}"
+    def render(self, pretty=True) -> str:
+        return f"{self.sym.render(pretty=pretty)}: {self.type.sym.render(pretty=pretty)}"
 
 class NodeStructDefinition(Node):
     def __init__(self, sym: Symbol, fields: list[NodeStructField], type: Type) -> None:
@@ -299,12 +296,16 @@ class NodeStructDefinition(Node):
         self.sym = sym
         self.fields = fields
 
-    def render(self) -> str:
-        field_strs = "\n".join(["  " + x.render() for x in self.fields])
-        body_str = "{}" if len(field_strs) == 0 else f"{{\n{field_strs}\n}}"
+    def render(self, pretty=True) -> str:
+        if pretty:
+            field_strs = "\n".join(["  " + x.render(pretty=pretty) for x in self.fields])
+            body_str = "{}" if len(field_strs) == 0 else f"{{\n{field_strs}\n}}"
+        else:
+            field_strs = " ".join(["  " + x.render(pretty=pretty) for x in self.fields])
+            body_str = "{}" if len(field_strs) == 0 else f"{{{field_strs}}}"
         magic_str = "@magic " if self.sym.magic else ""
         pub_str = "pub " if self.sym.public else ""
-        return f"{magic_str}{pub_str}struct {self.sym.render()} {body_str}"
+        return f"{magic_str}{pub_str}struct {self.sym.render(pretty=pretty)} {body_str}"
 
 class NodeFnParameters(Node):
     def __init__(self, args: list[tuple[NodeSymbol, Node]]):
@@ -314,8 +315,8 @@ class NodeFnParameters(Node):
         """
         self.args = args
 
-    def render(self) -> str:
-        return ", ".join([x[0].render() + ": " + x[1].type.sym.render() for x in self.args])
+    def render(self, pretty=True) -> str:
+        return ", ".join([x[0].render(pretty=pretty) + ": " + x[1].type.sym.render(pretty=pretty) for x in self.args])
 
 class NodeFnDefinition(Node):
     def __init__(self, sym: Symbol, params: NodeFnParameters, body: NodeBlockStmt, type: Type) -> None:
@@ -326,9 +327,9 @@ class NodeFnDefinition(Node):
         self.params = params # Need this for named args like foo(a=10)
         self.body = body
 
-    def render(self) -> str:
+    def render(self, pretty=True) -> str:
         pub_str = "pub " if self.sym.public else ""
-        return f"{pub_str}fn {self.sym.render()}({self.params.render()}) -> {self.sym.type.return_type().sym.render()} {self.body.render()}"
+        return f"{pub_str}fn {self.sym.render(pretty=pretty)}({self.params.render(pretty=pretty)}) -> {self.sym.type.return_type().sym.render(pretty=pretty)} {self.body.render(pretty=pretty)}"
 
 class NodeFnCall(Node):
     def __init__(self, callee: Node, original_callee: Node, args: list[Node], type: Type) -> None:
@@ -337,9 +338,9 @@ class NodeFnCall(Node):
         self.original_callee = original_callee
         self.args = args
 
-    def render(self) -> str:
-        args = ", ".join([x.render() for x in self.args])
-        return f"{self.original_callee.render()}({args})"
+    def render(self, pretty=True) -> str:
+        args = ", ".join([x.render(pretty=pretty) for x in self.args])
+        return f"{self.original_callee.render(pretty=pretty)}({args})"
 
 class NodeImport(Node):
     def __init__(self, module_sym: Symbol, orig_path: str, type: Type) -> None:
@@ -347,7 +348,7 @@ class NodeImport(Node):
         self.module_sym = module_sym
         self.orig_path = orig_path
 
-    def render(self) -> str:
+    def render(self, pretty=True) -> str:
         return f"import {self.orig_path}"
 
 class NodeFromImport(Node):
@@ -358,11 +359,11 @@ class NodeFromImport(Node):
         self.wildcard = wildcard
         self.orig_path = orig_path
 
-    def render(self) -> str:
+    def render(self, pretty=True) -> str:
         if self.wildcard:
             return f"from {self.orig_path} import *"
         else:
-            names = ", ".join([x.render() for x in self.to_import])
+            names = ", ".join([x.render(pretty=pretty) for x in self.to_import])
             return f"from {self.orig_path} import [{names}]"
 
 
@@ -399,7 +400,7 @@ class Symbol:
     def __repr__(self) -> str:
         return self.render(debug=True)
 
-    def render(self, debug=DEBUG) -> str:
+    def render(self, debug=DEBUG, pretty=True) -> str:
         # TODO: Use type info to render generics and others
         if debug:
             return f"{self.name}_{self.id}"
@@ -634,15 +635,15 @@ class Type:
             case _:
                 raise SerqInternalError(f"Forgot a literal type: {self.kind}")
 
-    def render(self) -> str:
+    def render(self, pretty=True) -> str:
         # TODO: match on sets?
         if self.kind in builtin_userspace_types or self.kind in literal_types:
             return self.kind.name
         elif self.kind == TypeKind.function:
-            args = ", ".join([x.render() for x in self.data[0]])
-            return f"fn({args}): {self.data[1].render()}"
+            args = ", ".join([x.render(pretty=pretty) for x in self.data[0]])
+            return f"fn({args}): {self.data[1].render(pretty=pretty)}"
         elif self.kind == TypeKind.type:
-            return self.sym.definition_node.render()
+            return self.sym.definition_node.render(pretty=pretty)
         else:
             raise SerqInternalError(f"Render isn't implemented for type kind {self.kind}")
 
@@ -1082,7 +1083,7 @@ class CompCtx:
 
     @staticmethod
     def resolve_escape_sequence(value: str) -> str:
-        return value.replace('\\"', '"')
+        return bytes(value, "utf-8").decode("unicode_escape")
 
     def integer(self, tree: Tree, expected_type: Type) -> NodeIntLit:
         assert tree.data == "integer", tree.data
@@ -1551,6 +1552,7 @@ class CompCtx:
         self.open_scope()
         
         args_node = self.fn_definition_args(tree.children[3], self.get_unit_type())
+
         ret_type_node = NodeSymbol(self.get_unit_type().sym, self.get_unit_type())
         ret_type = ret_type_node.type
         if tree.children[4] != None:
@@ -1567,13 +1569,16 @@ class CompCtx:
         # The sym must be created here to make recursive calls work without polluting the arg scope
         sym = self.current_scope.parent.get_oldest_sibling().put_function(ident, fn_type)
         sym.public = public
+        sym.magic = tree.children[0] != None and tree.children[0].children[0].children[0].value == "magic"
         fn_type.sym = sym
 
-        if tree.children[0] == None or tree.children[0].children[0].children[0].value != "magic":
+        for arg in [*fn_type.function_arg_types(), fn_type.return_type()]:
+            if arg.kind == TypeKind.magic and not sym.magic:
+                raise ValueError("The magic type is only allowed for functions marked as magic")
+
+        if not sym.magic:
             # TODO: Make this work for generics later
             self.defer_fn_body(sym, tree.children[5])
-        else:
-            sym.magic = True
 
         # Order is important here. We want the sibling to be part of the body's parent to isolate the insides and create a one-way boundary
         self.close_scope()
@@ -1662,13 +1667,30 @@ class CompCtx:
                         try:
                             parser = SerqParser(code.value)
                             parsed = parser.parse()
+                            if len(parsed.children) != 1:
+                                raise ValueError("Can only check the ast for a single statement. Use a block to render more at once.")
                             self.statement(parsed.children[0], self.get_infer_type())
                         except ValueError:
                             compiles = False
                         self.current_scope = cur_scope
                         return NodeBoolLit(compiles, Type(TypeKind.literal_bool, sym=None))
-                    case _:
+                    case "render_ast" | "render_ast_pretty":
+                        code = call.args[0]
+                        if not isinstance(code, NodeStringLit):
+                            raise ValueError("Tried checking if a non-literal string compiles")
+                        cur_scope = copy.deepcopy(self.current_scope)
+                        parser = SerqParser(code.value)
+                        parsed = parser.parse()
+                        if len(parsed.children) != 1:
+                            raise ValueError("Can only render the ast to a single statement. Use a block to render more at once.")
+                        stmt_arg = self.statement(parsed.children[0], self.get_infer_type())
+                        self.current_scope = cur_scope
+
+                        return NodeStringLit(stmt_arg.render(pretty=callsym.name == "render_ast_pretty"), Type(TypeKind.literal_string, sym=None))
+                    case "dbg" | "panic":
                         pass
+                    case _:
+                        raise NotImplementedError(callsym.name)
         return call
 
     def expression(self, tree: Tree, expected_type: Type) -> Node:
@@ -1708,27 +1730,35 @@ class CompCtx:
             raise SerqInternalError(f"Invalid expression length")
 
     def start(self, tree: Tree) -> NodeStmtList:
-        assert tree.data == "start", tree.data
-        result = NodeStmtList(self.current_scope.lookup_type("unit", shallow=True))
-        if self.module.name != MAGIC_MODULE_NAME:
-            result.add(self.make_from_import_node(MAGIC_MODULE_NAME, wildcard=True))
-        for child in tree.children:
-            node = self.statement(child, self.get_unit_type())
-            result.add(node)
-        if self.current_scope.parent != None:
-            raise SerqInternalError("Ended on a scope that isn't top level")
-        return result
+        try:
+            assert tree.data == "start", tree.data
+            result = NodeStmtList(self.current_scope.lookup_type("unit", shallow=True))
+            if self.module.name != MAGIC_MODULE_NAME:
+                result.add(self.make_from_import_node(MAGIC_MODULE_NAME, wildcard=True))
+            for child in tree.children:
+                node = self.statement(child, self.get_unit_type())
+                result.add(node)
+            if self.current_scope.parent != None:
+                raise SerqInternalError("Ended on a scope that isn't top level")
+            return result
+        except Exception as exc:
+            if len(exc.args) == 0:
+                exc.args = (f"\n{self.module.path}")
+            else:
+                exc.args = (str(exc.args[0]) + f"\n{self.module.path}", *exc.args[1:])
+            raise exc
 
 
 class Module:
-    def __init__(self, name: str, id: int, contents: str, graph: ModuleGraph) -> None:
+    def __init__(self, name: str, id: int, contents: str, graph: ModuleGraph, *, path: Optional[pathlib.Path]) -> None:
         self.graph = graph
 
         self.name = name
+        self.path = path
         self.global_scope = Scope(graph, module=self)
         self.id = id
         self.hash = hashlib.md5(contents.encode()).digest()
-        self.mod_tree = SerqParser(raw_data=contents).parse()#self.graph.serq_parser.parse(contents, display=False)
+        self.mod_tree = SerqParser(raw_data=contents).parse()
         self.ast: Node = None
         # mapping of (name, dict[params]) -> Type
         self.generic_cache: dict[tuple[str, dict[Symbol, Type]], Type] = {}
@@ -1758,26 +1788,17 @@ class ModuleGraph:
 
         self.builtin_scope = Scope(self, module=None) # TODO: Remove
 
-        # For now, unit is special because it's overused
-        unit_type_sym = self.builtin_scope.put_builtin_type(TypeKind.unit)
-
-        # TODO: hack
-        magic_sym = Symbol("-1", "magic", source_module=None)
-        magic_type = Type(TypeKind.magic, magic_sym)
-        magic_sym.type = magic_type
-
-        dbg_sym_type = Type(TypeKind.function, None, ([magic_type], unit_type_sym.type))
-        dbg_sym = self.builtin_scope.put_magic_function("dbg", dbg_sym_type)
-        dbg_sym_type.sym = dbg_sym
-
+        # These are both special so they are added here
+        self.builtin_scope.put_builtin_type(TypeKind.unit)
+        self.builtin_scope.put_builtin_type(TypeKind.magic)
 
     def load(self, path: str | pathlib.Path, file_contents: str) -> Module:
         if isinstance(path, str):
-            path = pathlib.Path(path + ".serq").absolute()
+            path = pathlib.Path(path).with_suffix(".serq").absolute()
         name = path.with_suffix("").name
         
         assert path not in self.modules
-        mod = Module(name, self._next_id, file_contents, self)
+        mod = Module(name, self._next_id, file_contents, self, path=path)
 
         # TODO: Proper sym generation
         mod_sym = Symbol(":module:" + str(self._next_id), name, None, source_module=None)
@@ -1812,7 +1833,7 @@ class ModuleGraph:
         is_std_import = name.startswith("std/")
         if is_std_import:
             name = "./serqlib/std/" + name[4:]
-        path = pathlib.Path(name + ".serq").absolute()
+        path = pathlib.Path(name).with_suffix(".serq").absolute()
 
         if path in self.modules:
             return self.modules[path]
