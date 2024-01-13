@@ -1769,10 +1769,6 @@ class ModuleGraph:
         dbg_sym = self.builtin_scope.put_magic_function("dbg", dbg_sym_type)
         dbg_sym_type.sym = dbg_sym
 
-        panic_sym_type = Type(TypeKind.function, None, ([], unit_type_sym.type))
-        panic_sym = self.builtin_scope.put_magic_function("panic", panic_sym_type)
-        panic_sym_type.sym = panic_sym
-
 
     def load(self, path: str | pathlib.Path, file_contents: str) -> Module:
         if isinstance(path, str):
