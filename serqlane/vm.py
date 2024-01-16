@@ -107,7 +107,7 @@ class SerqVM:
         for field in struct.fields:
             field_name = field.sym.qualified_name()
             match field.type.kind:
-                case TypeKind.type:
+                case TypeKind.struct:
                     try:
                         type = self.get_value_on_stack(field.type.sym)
                     except KeyError:

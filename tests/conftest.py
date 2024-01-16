@@ -18,7 +18,7 @@ def module_graph() -> ModuleGraph:
     return graph
 
 def clear_graph(graph: ModuleGraph):
-    magic_path = pathlib.Path(MAGIC_MODULE_NAME + ".serq").absolute()
+    magic_path = pathlib.Path(MAGIC_MODULE_NAME).with_suffix(".serq").absolute()
     graph.modules = {magic_path: graph.modules[magic_path]}
 
 
