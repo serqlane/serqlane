@@ -8,7 +8,6 @@ import hashlib
 import textwrap
 
 from serqlane.parser import Token, Tree, SerqParser
-#from serqlane.parser import SerqParser
 from serqlane.common import SerqInternalError
 
 
@@ -365,19 +364,8 @@ class NodeFromImport(Node):
             return f"from {self.orig_path} import [{names}]"
 
 
-# TODO: Use these, will make later analysis easier
-class SymbolKind(Enum):
-    variable = auto()
-    function = auto()
-    parameter = auto()
-    type = auto() # TODO: Types
-    field = auto()
-
-
-# TODO: Give every symbol a generation. Deferred function bodies should not be able to look up globals defined after themselves
 class Symbol:
     def __init__(self, id: str, name: str, type: Type = None, mutable: bool = False, magic=False, *, source_module: Optional[Module]) -> None:
-        # TODO: Should store the source node, symbol kinds
         self.id = id
         self.name = name
         self.type = type
@@ -447,7 +435,7 @@ class TypeKind(Enum):
     concrete_type = auto() # non-generic concrete Type or fn()
     generic_inst = auto() # fully instantiated generic type Type[int] or fn[int](): generic_inst[concerete_type, generic_type[params]]
     generic_type = auto() # Type[T] or fn[T](): generic_type[params]
-    type = auto() # TODO: magic that holds a type itself, not yet in grammar
+    struct = auto()
 
     module = auto() # Comes from imports: `import x` -> x is a sym of type module
     namespace = auto() # Comes from imports: `import a.b` -> `a` is a namespace and `b` is a module inside of `a`
@@ -494,7 +482,7 @@ free_infer_types = frozenset([
 
 callable_types = frozenset([
     TypeKind.function,
-    TypeKind.type,
+    TypeKind.struct,
 ])
 
 
@@ -551,7 +539,6 @@ class Type:
 
             # magic types
 
-            # TODO: Can you match sets?
             case TypeKind.char | TypeKind.pointer:
                 return self.kind == other.kind
             case TypeKind.bool:
@@ -594,7 +581,7 @@ class Type:
             case TypeKind.generic_type:
                 raise SerqInternalError("generic types aren't ready yet")
 
-            case TypeKind.type | TypeKind.concrete_type:
+            case TypeKind.struct | TypeKind.concrete_type:
                 if id(self) == id(other): # TODO: It should NOT use python id, should use a concrete id or something. Need a type cache for that
                     return True
                 # TODO: If this fails even though the types should be the same the cache got messed up somehow
@@ -634,13 +621,12 @@ class Type:
                 raise SerqInternalError(f"Forgot a literal type: {self.kind}")
 
     def render(self) -> str:
-        # TODO: match on sets?
         if self.kind in builtin_userspace_types or self.kind in literal_types:
             return self.kind.name
         elif self.kind == TypeKind.function:
             args = ", ".join([x.render() for x in self.data[0]])
             return f"fn({args}): {self.data[1].render()}"
-        elif self.kind == TypeKind.type:
+        elif self.kind == TypeKind.struct:
             return self.sym.definition_node.render()
         else:
             raise SerqInternalError(f"Render isn't implemented for type kind {self.kind}")
@@ -713,7 +699,6 @@ class Scope:
         self._inject_import_namespaces(node.orig_path, node.module_sym)
 
     def do_from_import(self, node: NodeFromImport):
-        # TODO: Replicate namespace logic from above!!!
         if node.wildcard:
             syms = list(node.module_sym.type.data.global_scope.iter_syms(only_public=True, include_magics=False, include_imports=False))
             self._imported_syms[node.module_sym.type.data] = syms
@@ -829,9 +814,9 @@ class Scope:
         sym.type = Type(kind=kind, sym=sym)
         return sym
     
-    def put_type(self, name: str) -> Symbol:
+    def put_struct(self, name: str) -> Symbol:
         sym = self.put(name)
-        sym.type = Type(kind=TypeKind.type, sym=sym)
+        sym.type = Type(kind=TypeKind.struct, sym=sym)
         return sym
 
     def put_let(self, name: str, mutable=False, checked=True, shallow=False) -> Symbol:
@@ -965,7 +950,6 @@ class CompCtx:
         return self.make_from_import_node(import_path=import_path, names=names, wildcard=wildcard)
 
     def handle_import(self, tree: Tree):
-        # TODO: More complex handling. Doing it like this has millions of issues, but good enough for first prototype
         import_path = tree.children[0].value
         module = self.graph.request_module(import_path)
         res = NodeImport(module.sym, orig_path=import_path, type=self.get_unit_type())
@@ -1085,7 +1069,7 @@ class CompCtx:
 
     @staticmethod
     def resolve_escape_sequence(value: str) -> str:
-        return value.replace('\\"', '"')
+        return bytes(value, "utf-8").decode("unicode_escape")
 
     def integer(self, tree: Tree, expected_type: Type) -> NodeIntLit:
         assert tree.data == "integer", tree.data
@@ -1123,7 +1107,6 @@ class CompCtx:
             if both_lit and type(lhs) != type(rhs):
                 raise ValueError("Incompatible literal node types")
 
-            # TODO: Dot expr
             if not lhs.type.types_compatible(rhs.type):
                 # TODO: Error reporting
                 tl = lhs.type.instantiate_literal(self.graph) if lhs.type.kind in literal_types else lhs.type
@@ -1219,7 +1202,6 @@ class CompCtx:
                         return NodeBoolLit(lhs.value or rhs.value, type=expr_type)
                 return NodeOrExpression(lhs, rhs, type=expr_type)
             
-            # TODO: Is this version of ensure_types correct here?
             case "equals":
                 if both_lit:
                     return NodeBoolLit(lhs.value == rhs.value, type=self.current_scope.lookup_type("bool"))
@@ -1251,14 +1233,13 @@ class CompCtx:
                 return NodeGreaterEqualsExpression(lhs, rhs, type=self.current_scope.lookup_type("bool"))
 
             case "dot":
-                # TODO: Has to use the type of rhs for node type, can only be done once types and field lookup exist
                 lhs = self.expression(tree.children[0], None)
                 if isinstance(lhs, NodeOptions):
                     lhs = lhs.use_first() # TODO: This WILL cause bad symbol lookup
                 rhs = tree.children[2].children[0].value
 
                 match lhs.type.kind:
-                    case TypeKind.type:
+                    case TypeKind.struct:
                         assert isinstance(lhs.type.sym.definition_node, NodeStructDefinition), "Dot operations are currently only ready for structs"
                         matching_field_sym = None
                         # TODO: Do a scope-esque lookup instead. Things like inheritance may silently add more things later
@@ -1306,8 +1287,8 @@ class CompCtx:
 
     def user_type(self, tree: Tree) -> NodeSymbol:
         assert tree.data in ["user_type", "return_user_type"], tree.data
-        options = self.identifier(tree.children[0], None) # TODO: Enforce `type` metatype
-        return options.extract_unambiguous() # TODO: Allow ambigous names and infer based on context?
+        options = self.identifier(tree.children[0], None)
+        return options.extract_unambiguous()
 
     def assignment(self, tree: Tree, expected_type: Type) -> NodeAssignment:
         assert tree.data == "assignment", tree.data
@@ -1361,8 +1342,6 @@ class CompCtx:
         if tree.children[f].data == "user_type":
             # we have a user provided type node
             type_tree = tree.children[f]
-            # TODO: Return an empty node with empty type
-            # TODO: Have expected type be `type` metatype
             type_sym = self.user_type(type_tree)
             f += 1
         
@@ -1386,7 +1365,7 @@ class CompCtx:
         else:
             # infer type from value
             # TODO: Instantiate types, for now only literals            
-            if val_node.type.kind in builtin_userspace_types or val_node.type.kind == TypeKind.type:
+            if val_node.type.kind in builtin_userspace_types or val_node.type.kind == TypeKind.struct:
                 resolved_type = val_node.type
             else:
                 # Literals infer their own types to the default if told to do so
@@ -1468,7 +1447,7 @@ class CompCtx:
         if decorator == "magic":
             sym = self.current_scope.get_oldest_sibling().put_builtin_type(TypeKind[ident])
         elif decorator == "":
-            sym = self.current_scope.get_oldest_sibling().put_type(ident)
+            sym = self.current_scope.get_oldest_sibling().put_struct(ident)
         else:
             raise NotImplementedError("Non-magic struct decorators aren't supported for now")
         sym.public = public
@@ -1558,7 +1537,7 @@ class CompCtx:
         ret_type = ret_type_node.type
         if tree.children[3] != None:
             ret_type_node = self.user_type(tree.children[3])
-            ret_type = ret_type_node.type # TODO: Fix this nonsense, type should be `type`, not whatever the type evaluates to
+            ret_type = ret_type_node.type
 
         # TODO: Use a type cache to load function with the same type from it for easier matching
         fn_type = Type(
@@ -1617,7 +1596,7 @@ class CompCtx:
                                 args=params,
                                 type=callee_node.type.return_type(),
                             )]
-                        case TypeKind.type:
+                        case TypeKind.struct:
                             if len(unresolved_args) != 0:
                                 raise SerqInternalError("Cannot yet handle calls to types with parameters")
                             return [NodeFnCall(
@@ -1653,7 +1632,6 @@ class CompCtx:
 
     def expression(self, tree: Tree, expected_type: Type) -> Node:
         assert tree.data == "expression", tree.data
-        # TODO: Handle longer expressions?
         assert len(tree.children) == 1
         result = []
         tree: Tree = tree
@@ -1708,12 +1686,8 @@ class Module:
         self.global_scope = Scope(graph, module=self)
         self.id = id
         self.hash = hashlib.md5(contents.encode()).digest()
-        self.mod_tree = SerqParser(raw_data=contents).parse()#self.graph.serq_parser.parse(contents, display=False)
+        self.mod_tree = SerqParser(raw_data=contents).parse()
         self.ast: Node = None
-        # mapping of (name, dict[params]) -> Type
-        self.generic_cache: dict[tuple[str, dict[Symbol, Type]], Type] = {}
-
-        # TODO: Generics should use the same deferred trick, but they should not be removed from the deferred list
         self.deferred_fn_bodies: list[tuple[Symbol, Tree, Scope]] = []
         self.sym: Optional[Symbol] = None
 
@@ -1757,7 +1731,7 @@ class ModuleGraph:
 
     def load(self, path: str | pathlib.Path, file_contents: str) -> Module:
         if isinstance(path, str):
-            path = pathlib.Path(path + ".serq").absolute()
+            path = pathlib.Path(path).with_suffix(".serq").absolute()
         name = path.with_suffix("").name
         
         assert path not in self.modules
@@ -1796,7 +1770,7 @@ class ModuleGraph:
         is_std_import = name.startswith("std/")
         if is_std_import:
             name = "./serqlib/std/" + name[4:]
-        path = pathlib.Path(name + ".serq").absolute()
+        path = pathlib.Path(name).with_suffix(".serq").absolute()
 
         if path in self.modules:
             return self.modules[path]
