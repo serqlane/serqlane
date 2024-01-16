@@ -77,6 +77,7 @@ class SqTokenKind(Enum):
     INTEGER = "{integer}"
     DECIMAL = "{decimal}"
     STRING = "{string}"
+    CHAR = "{char}"
     SINGLE_LINE_DOC_COMMENT = "{doc}"
 
     def is_keyword(self) -> bool:
@@ -148,6 +149,8 @@ class SqToken:
                     return val.format(decimal=self.literal)
                 case SqTokenKind.STRING:
                     return val.format(string=self.literal)
+                case SqTokenKind.CHAR:
+                    return val.format(char=self.literal)
                 case SqTokenKind.SINGLE_LINE_DOC_COMMENT:
                     return val.format(doc=self.literal)
                 case _:
@@ -281,7 +284,8 @@ class Tokenizer:
                         f"Numeric literal with {dot_count} dots found: {lit}",
                         self.make_token(SqTokenKind.ERROR, lit)
                     )
-            elif c == '"':
+            elif c in ['"', "'"]:
+                quote = c
                 self.advance()
                 escaping = False
                 found_quote = False
@@ -290,7 +294,7 @@ class Tokenizer:
                     nonlocal found_quote
                     if found_quote:
                         return False
-                    is_quote = x == '"' and not escaping
+                    is_quote = x == quote and not escaping
                     if is_quote:
                         found_quote = True
                     if x == "\\":
@@ -299,13 +303,25 @@ class Tokenizer:
                         escaping = False
                     return True
                 lit = c + self.take_while(pred)
+                lit = bytes(lit, "utf-8").decode("unicode_escape")
                 if not found_quote:
                     self.report_error(
                         f"Encountered an unclosed string literal: {lit}",
                         self.make_token(SqTokenKind.ERROR, lit)
                     )
+                elif quote == "'" and len(lit[1:-1]) != 1:
+                    if len(lit) == 2:
+                        self.report_error(
+                            f"A char literal cannot be empty: {lit}",
+                            self.make_token(SqTokenKind.ERROR, lit)
+                        )
+                    else:
+                        self.report_error(
+                            f"A char literal cannot be made up of multiple characters: {lit}",
+                            self.make_token(SqTokenKind.ERROR, lit)
+                        )
                 yield SqToken(
-                    kind=SqTokenKind.STRING,
+                    kind=SqTokenKind.STRING if quote == '"' else SqTokenKind.CHAR,
                     literal=lit,
                     line=self.line,
                     column_start=self.column - len(lit),
