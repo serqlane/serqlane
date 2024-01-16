@@ -135,6 +135,17 @@ class NodeLet(Node):
         is_mut = self.sym_node.symbol.mutable
         return f"let {"mut " if is_mut else ""}{self.sym_node.render()}{": " + self.sym_node.type.sym.render()} = {self.expr.render()}"
 
+class NodeConst(Node):
+    def __init__(self, sym_node: NodeSymbol, expr: Node, type: Type):
+        super().__init__(type)
+        self.sym_node = sym_node
+        self.expr = expr
+
+    def render(self) -> str:
+        val_t = self.sym_node.type
+        type_str = f": {val_t.render()}" if not val_t.is_literal_type() else ""
+        return f"const {self.sym_node.render()}{type_str} = {self.expr.render()}"
+
 class NodeAssignment(Node):
     def __init__(self, lhs: Node, rhs: Node, type: Type) -> None:
         super().__init__(type)
@@ -389,6 +400,7 @@ class Symbol:
         self.name = name
         self.type = type
         self.public = False
+        self.const = False
         self.mutable = mutable
         self.definition_node: Node = None
         self.magic = magic
@@ -977,7 +989,9 @@ class CompCtx:
             case "alias_definition":
                 return self.alias_definition(child, expected_type)
             case "let_stmt":
-                return self.let_stmt(child, expected_type)
+                return self.let_stmt(child)
+            case "const_stmt":
+                return self.const_stmt(child)
             case "return_stmt":
                 return self.return_stmt(child)
             case "assignment":
@@ -1353,7 +1367,16 @@ class CompCtx:
         for sym in self.current_scope.iter_syms(val, include_imports=True):
             if sym.type.is_alias():
                 sym = sym.definition_node.skip_safe_aliases()
-            res.options.append(NodeSymbol(sym, sym.type))
+            if sym.const:
+                assert isinstance(sym.definition_node, NodeConst)
+                assert isinstance(sym.definition_node.expr, NodeLiteral)
+                if expected_type == None or expected_type.types_compatible(sym.definition_node.expr.type):
+                    typ = expected_type if expected_type != None else sym.definition_node.expr.type
+                    if typ.is_free_infer_type() and sym.definition_node.expr.type.is_literal_type():
+                        typ = sym.definition_node.expr.type.instantiate_literal(self.graph)
+                    res.options.append(type(sym.definition_node.expr)(sym.definition_node.expr.value, typ))
+            else:
+                res.options.append(NodeSymbol(sym, sym.type))
 
         if len(res.options) > 0:
             return res
@@ -1397,7 +1420,7 @@ class CompCtx:
 
         return NodeAssignment(lhs, rhs, self.get_unit_type())
 
-    def let_stmt(self, tree: Tree, expected_type: Type) -> NodeLet:
+    def let_stmt(self, tree: Tree) -> NodeLet:
         assert tree.data == "let_stmt", tree.data
         mut_node = tree.children[0]
 
@@ -1457,6 +1480,30 @@ class CompCtx:
             expr=val_node,
             type=self.get_unit_type()
         )
+
+    def const_stmt(self, tree: Tree) -> NodeConst:
+        assert tree.data == "const_stmt", tree.data
+        ident_node = tree.children[0]
+        assert ident_node.data == "identifier"
+        ident = ident_node.children[0].value
+
+        type_sym = None if tree.children[1] == None else self.user_type(tree.children[1])
+        val_node = self.expression(tree.children[2], type_sym.type if type_sym != None else None)
+        if not isinstance(val_node, NodeLiteral):
+            raise ValueError("Consts only permit literal expressions right now")
+
+        sym = self.current_scope.put_let(ident, mutable=False)
+        sym.type = val_node.type
+        sym.const = True
+
+        res = NodeConst(
+            sym_node=NodeSymbol(sym, sym.type),
+            expr=val_node,
+            type=self.get_unit_type(),
+        )
+        sym.definition_node = res
+        return res
+
 
     def return_stmt(self, tree: Tree) -> NodeReturn:
         assert tree.data == "return_stmt", tree.data

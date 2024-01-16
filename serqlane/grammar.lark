@@ -44,6 +44,7 @@ _type: identifier // TODO: Make it visible; get rid of _ for that
 user_type: ":" _type
 return_user_type: "->" _type
 
+const_stmt: "const" identifier [user_type] = expression
 let_stmt: "let" MUT? identifier user_type? "=" expression
 MUT: "mut"
 assignment: expression "=" expression
