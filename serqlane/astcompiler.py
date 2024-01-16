@@ -1445,6 +1445,18 @@ class CompCtx:
 
         val_node_expected_type = type_sym.type if type_sym != None else self.get_infer_type()
         val_node = self.expression(tree.children[f], val_node_expected_type)
+        if isinstance(val_node, NodeDotAccess) and isinstance(val_node.rhs, NodeOptions) and isinstance(val_node.rhs.extract_unambiguous(), NodeSymbol):
+            val_node = NodeDotAccess(val_node.lhs, val_node.rhs.extract_unambiguous())
+        if isinstance(val_node, NodeDotAccess) and isinstance(val_node.rhs, NodeSymbol) and val_node.rhs.symbol.const:
+            assert isinstance(val_node.rhs.symbol.definition_node, NodeConst)
+            assert isinstance(val_node.rhs.symbol.definition_node.expr, NodeLiteral)
+            cnode = val_node.rhs.symbol.definition_node.expr
+            if val_node_expected_type == None or val_node_expected_type.is_free_infer_type():
+                val_node = type(cnode)(cnode.value, cnode.type.instantiate_literal(self.graph))
+            else:
+                if not val_node_expected_type.types_compatible(cnode.type):
+                    raise SerqTypeInferError(f"Incompatible types in let {val_node_expected_type.kind} = {val_node_expected_type.kind}")
+                val_node = type(cnode)(cnode.value, val_node_expected_type)
         if isinstance(val_node, NodeOptions):
             val_node = val_node.extract_unambiguous()
         if val_node.type.kind == TypeKind.unit:
