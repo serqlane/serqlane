@@ -39,10 +39,10 @@ class SerqParser:
         self.tokenizer = Tokenizer(raw_data, filepath=filepath)
         self._token_queue: list[SqToken] = [] # stores the current token and however many were peeked
         self._token_iter = self.tokenizer.process_iter()
-        
+
         self._cur_decorator: Optional[Tree] = None
         self._cur_pub: Optional[Tree] = None
-        
+
         self._skip_newlines = True
         self._stored_newlines = 0
 
@@ -132,7 +132,7 @@ class SerqParser:
         self.expect([SqTokenKind.CLOSE_PAREN])
         if len(result.children) == 0:
             result.add(None)
-        return result        
+        return result
 
     def _eat_operator(self) -> Token:
         op = self.expect([
@@ -172,7 +172,7 @@ class SerqParser:
         res = Tree(
             "block_expression",
             children=self._handle_stmt_list([SqTokenKind.CLOSE_CURLY])  # type: ignore (list covariance)
-        )  
+        )
         self.expect([SqTokenKind.CLOSE_CURLY])
         return res
 
@@ -251,7 +251,7 @@ class SerqParser:
         while self.peek(0).kind in [SqTokenKind.STAR, SqTokenKind.SLASH, SqTokenKind.MODULUS]:
             op = self._eat_operator()
             rhs = self._descend_dot_expr()
-            expr = self._wrap_expr(Tree("binary_expression", children=[expr, op, rhs]))        
+            expr = self._wrap_expr(Tree("binary_expression", children=[expr, op, rhs]))
         return expr
 
 
@@ -260,7 +260,7 @@ class SerqParser:
         while self.peek(0).kind in [SqTokenKind.PLUS, SqTokenKind.MINUS]:
             op = self._eat_operator()
             rhs = self._descend_mul_expr()
-            expr = self._wrap_expr(Tree("binary_expression", children=[expr, op, rhs])) 
+            expr = self._wrap_expr(Tree("binary_expression", children=[expr, op, rhs]))
         return expr
 
     def _descend_cmp_expr(self) -> Tree:
@@ -270,7 +270,7 @@ class SerqParser:
             rhs = self._descend_plus_expr()
             expr = self._wrap_expr(Tree("binary_expression", children=[expr, op, rhs]))
         return expr
-    
+
     def _descend_and_expr(self) -> Tree:
         expr = self._descend_cmp_expr()
         while self.peek(0).kind in [SqTokenKind.AND, SqTokenKind.OR]:
@@ -311,7 +311,7 @@ class SerqParser:
         self.expect([SqTokenKind.EQ])
         res.add(self._eat_expression())
         return res
-    
+
     def _eat_function_definition_args(self) -> Tree:
         self.expect([SqTokenKind.OPEN_PAREN])
         result = Tree("fn_definition_args")
@@ -324,7 +324,7 @@ class SerqParser:
             self.advance()
         self.expect([SqTokenKind.CLOSE_PAREN])
         return result
-    
+
     def _eat_function_definition(self) -> Tree:
         self.expect([SqTokenKind.FN])
         result = Tree("fn_definition", children=[self._cur_pub])
@@ -346,7 +346,7 @@ class SerqParser:
 
         result.add(self._eat_identifier())
         self.expect([SqTokenKind.OPEN_CURLY])
-        
+
         field_list: list[Tree] = []
         cursor = self.peek(0)
         while cursor.kind != SqTokenKind.CLOSE_CURLY:
@@ -365,7 +365,7 @@ class SerqParser:
         self.expect([SqTokenKind.CLOSE_CURLY])
 
         return result
-    
+
     def _eat_alias(self) -> Tree:
         self.expect([SqTokenKind.ALIAS])
         result = Tree("alias_definition")
@@ -373,7 +373,7 @@ class SerqParser:
         self.expect([SqTokenKind.EQ])
         result.add(self._eat_identifier())
         return result
-    
+
     def _eat_if_stmt(self) -> Tree:
         self.expect([SqTokenKind.IF])
         result = Tree("if_stmt")
@@ -386,7 +386,7 @@ class SerqParser:
         else:
             result.add(None)
         return result
-    
+
     def _eat_import_path(self) -> Token:
         result = Token("import_path", value="")
 
@@ -516,7 +516,7 @@ class SerqParser:
         if len(result.children) == 0:
             raise SerqInternalError()
         return result
-    
+
     def _handle_stmt_list(self, until: list[SqTokenKind]) -> list[Tree]:
         result: list[Tree] = []
         tok = self.peek(0)

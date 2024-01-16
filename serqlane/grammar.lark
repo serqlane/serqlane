@@ -122,7 +122,7 @@ string: "\"" string_inner? "\""
 ?string_inner: /((\\\"|[^\"])+)/
 // TODO: char
 
-_TERMINATOR: /\n/ 
+_TERMINATOR: /\n/
 
 COMMENT: /\s*/ "//" /[^\n]/*
 %ignore COMMENT

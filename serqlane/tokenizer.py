@@ -48,11 +48,11 @@ class SqTokenKind(Enum):
     # keywords
     TRUE = "true"
     FALSE = "false"
-    
+
     AND = "and"
     OR = "or"
     NOT = "not"
-    
+
     LET = "let"
     MUT = "mut"
     PUB = "pub"
@@ -136,7 +136,7 @@ class SqToken:
             self.column_start,
             self.column_end,
         )
- 
+
     def render(self) -> str:
         val = self.kind.value
         if val.startswith("{"):
@@ -182,7 +182,7 @@ class Tokenizer:
         if self.remaining > offset:
             return self.data[self.offset + offset]
         return ""
-    
+
     def take_while(self, pred: Callable[[str], bool]) -> str:
         c = self.peek(0)
         if not pred(c):
@@ -213,7 +213,7 @@ class Tokenizer:
             location_str = f"\nAt: {self.filepath.absolute()}:{tok.get_line_info().to_path_cursor()}"
         else:
             location_str = f"\nline: {tok.get_line_info().line}\ncolumn: {tok.get_line_info().column_start}"
-        
+
         message += location_str
         raise TokenizerError(message)
 
