@@ -142,7 +142,7 @@ class SerqVM:
                 assert expression.type is not None
 
                 # TODO: should this be handled like this?
-                if expression.type.kind in int_types:
+                if expression.type.is_int_type():
                     operation = operator.floordiv
                 else:
                     if expression.type.kind is TypeKind.literal_int:

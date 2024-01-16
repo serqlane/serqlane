@@ -284,6 +284,12 @@ class NodeAliasDefinition(Node):
         self.sym = sym
         self.src = src
 
+    def skip_safe_aliases(self) -> Node:
+        res = self.src
+        while res.type.is_alias():
+            res = res.src
+        return res
+
     def render(self) -> str:
         return f"alias {self.sym.render()} = {self.src.render()}"
 
@@ -454,7 +460,7 @@ class TypeKind(Enum):
     module = auto() # Comes from imports: `import x` -> x is a sym of type module
     namespace = auto() # Comes from imports: `import a.b` -> `a` is a namespace and `b` is a module inside of `a`
 
-int_types = frozenset([
+_int_types = frozenset([
     TypeKind.int8,
     TypeKind.uint8,
     TypeKind.int16,
@@ -465,16 +471,16 @@ int_types = frozenset([
     TypeKind.uint64,
 ])
 
-ordinal_types = frozenset([
+_ordinal_types = frozenset([
     TypeKind.literal_int,
-] + list(int_types))
+] + list(_int_types))
 
-float_types = frozenset([
+_float_types = frozenset([
     TypeKind.float32,
     TypeKind.float64,
 ])
 
-literal_types = frozenset([
+_literal_types = frozenset([
     TypeKind.literal_int,
     TypeKind.literal_float,
     TypeKind.literal_bool,
@@ -483,37 +489,71 @@ literal_types = frozenset([
 ])
 
 # TODO: Other solution based on operator signatures
-arith_types = frozenset([
+_arith_types = frozenset([
     TypeKind.literal_int,
     TypeKind.literal_float,
-] + list(int_types) + list(float_types))
+] + list(_int_types) + list(_float_types))
 
-logical_types = frozenset([
+_logical_types = frozenset([
     TypeKind.literal_int,
     TypeKind.literal_bool,
     TypeKind.bool
-] + list(int_types))
+] + list(_int_types))
 
-free_infer_types = frozenset([
+_free_infer_types = frozenset([
     TypeKind.magic,
     TypeKind.infer,
 ])
 
-callable_types = frozenset([
+_callable_types = frozenset([
     TypeKind.function,
     TypeKind.struct,
 ])
 
 
 # TODO: Add the other appropriate types
-builtin_userspace_types = frozenset(list(int_types) + list(float_types) + [TypeKind.bool, TypeKind.char, TypeKind.string, TypeKind.unit])
+builtin_userspace_types = frozenset(list(_int_types) + list(_float_types) + [TypeKind.bool, TypeKind.char, TypeKind.string, TypeKind.unit])
 
 class Type:
-    def __init__(self, kind: TypeKind, sym: Symbol, data: Any = None) -> None:
+    def __init__(self, kind: TypeKind, sym: Symbol, data: Any = None, *, base: Optional[Type] = None) -> None:
         self.kind = kind
         self.data = data # TODO: arbitrary data for now
         self.sym = sym
+        self.base = base
         # TODO: Add a type id later
+
+    def is_alias(self) -> bool:
+        return self.kind == TypeKind.alias
+
+    def is_free_infer_type(self) -> bool:
+        return self.kind in _free_infer_types
+
+    def is_literal_type(self) -> bool:
+        return self.kind in _literal_types
+
+    def is_arith_type(self) -> bool:
+        return self.kind in _arith_types
+
+    def is_logical_type(self) -> bool:
+        return self.kind in _logical_types
+
+    def is_int_type(self) -> bool:
+        return self.kind in _int_types
+
+    def is_float_type(self) -> bool:
+        return self.kind in _float_types
+
+    def is_ordinal_type(self) -> bool:
+        return self.kind in _ordinal_types
+
+    def is_callable_type(self) -> bool:
+        return self.kind in _callable_types
+
+    def skip_safe_aliases(self) -> Type:
+        res = self
+        while res.is_alias():
+            res = res.base
+        return res
 
     def function_arg_types(self) -> list[Type]:
         assert self.kind == TypeKind.function
@@ -552,17 +592,20 @@ class Type:
         """
         other is always the target
         """
-        if self.kind in free_infer_types or other.kind in free_infer_types:
+        lhs = self
+        rhs = other
+
+        if lhs.is_free_infer_type() or rhs.is_free_infer_type():
             return True
 
         # TODO: Match variant, like generic inst of generic type
-        match self.kind:
+        match lhs.kind:
             case TypeKind.error:
                 return False
 
             # TODO: Not sure what to do about these
             case TypeKind.unit:
-                return self.kind == other.kind
+                return lhs.kind == rhs.kind
 
             case TypeKind.function:
                 raise NotImplementedError() # TODO
@@ -570,25 +613,25 @@ class Type:
             # magic types
 
             case TypeKind.char | TypeKind.pointer:
-                return self.kind == other.kind
+                return lhs.kind == rhs.kind
             case TypeKind.bool:
-                return self.kind == other.kind or other.kind == TypeKind.literal_bool
+                return lhs.kind == rhs.kind or rhs.kind == TypeKind.literal_bool
             case TypeKind.int8 | TypeKind.uint8 | TypeKind.int16 | TypeKind.uint16 | TypeKind.int32 | TypeKind.uint32 | TypeKind.int64 | TypeKind.uint64:
-                return self.kind == other.kind or other.kind == TypeKind.literal_int
+                return lhs.kind == rhs.kind or rhs.kind == TypeKind.literal_int
             case TypeKind.float32 | TypeKind.float64:
-                return self.kind == other.kind or other.kind == TypeKind.literal_float
+                return lhs.kind == rhs.kind or rhs.kind == TypeKind.literal_float
             case TypeKind.string:
-                return self.kind == other.kind or other.kind == TypeKind.literal_string
+                return lhs.kind == rhs.kind or rhs.kind == TypeKind.literal_string
 
             case TypeKind.reference:
-                if self.kind != other.kind:
+                if lhs.kind != rhs.kind:
                     return False
-                return self.data.compare(other.data)
+                return lhs.data.compare(rhs.data)
 
             case TypeKind.array:
-                if self.kind != other.kind:
+                if lhs.kind != rhs.kind:
                     return False
-                return self.data[0].compare(other.data[0]) and self.data[1].compare(other.data[0])
+                return lhs.data[0].compare(rhs.data[0]) and lhs.data[1].compare(rhs.data[0])
 
             case TypeKind.static:
                 # TODO: static is allowed to be turned into the corresponding non-static version but not vice versa
@@ -596,7 +639,7 @@ class Type:
 
             case TypeKind.alias:
                 # TODO: Generic aliases. Need to map potentially new generic params around and then reduce the type if required
-                raise SerqInternalError("aliases aren't ready yet")
+                raise SerqInternalError("Reached alias comparison for a non-generic alias")
 
             case TypeKind.distinct:
                 # TODO: distinct generics are tough
@@ -612,7 +655,7 @@ class Type:
                 raise SerqInternalError("generic types aren't ready yet")
 
             case TypeKind.struct | TypeKind.concrete_type:
-                if id(self) == id(other): # TODO: It should NOT use python id, should use a concrete id or something. Need a type cache for that
+                if id(lhs) == id(rhs): # TODO: It should NOT use python id, should use a concrete id or something. Need a type cache for that
                     return True
                 # TODO: If this fails even though the types should be the same the cache got messed up somehow
 
@@ -620,16 +663,16 @@ class Type:
             # literals
 
             case TypeKind.literal_bool:
-                return other.kind in {TypeKind.literal_bool, TypeKind.bool}
+                return rhs.kind in {TypeKind.literal_bool, TypeKind.bool}
             case TypeKind.literal_int:
-                return other.kind in int_types or other.kind == TypeKind.literal_int
+                return rhs.is_int_type() or rhs.kind == TypeKind.literal_int
             case TypeKind.literal_float:
-                return other.kind in float_types or other.kind == TypeKind.literal_float
+                return rhs.is_float_type() or rhs.kind == TypeKind.literal_float
             case TypeKind.literal_string:
-                return other.kind in {TypeKind.literal_string, TypeKind.string}
+                return rhs.kind in {TypeKind.literal_string, TypeKind.string}
 
             case _:
-                raise SerqInternalError(f"Unimplemented type comparison: {self.kind}")
+                raise SerqInternalError(f"Unimplemented type comparison: {lhs.kind}")
 
     def instantiate_literal(self, graph: ModuleGraph) -> Type:
         """
@@ -637,7 +680,7 @@ class Type:
         """
         # TODO: Move this out of Type. A type shouldn't instantiate itself for lack of context.
         #       Evident by the lookups below, will break stuff very soon
-        assert self.kind in literal_types
+        assert self.is_literal_type()
         match self.kind:
             case TypeKind.literal_int:
                 return graph.request_module(MAGIC_MODULE_NAME).global_scope.lookup_type("int64")
@@ -651,8 +694,10 @@ class Type:
                 raise SerqInternalError(f"Forgot a literal type: {self.kind}")
 
     def render(self) -> str:
-        if self.kind in builtin_userspace_types or self.kind in literal_types:
+        if self.kind in builtin_userspace_types or self.is_literal_type():
             return self.kind.name
+        elif self.kind == TypeKind.alias:
+            return self.sym.render()
         elif self.kind == TypeKind.function:
             args = ", ".join([x.render() for x in self.data[0]])
             return f"fn({args}): {self.data[1].render()}"
@@ -784,7 +829,7 @@ class Scope:
 
     def iter_function_defs(self, name: Optional[str] = None, only_public=False, include_imports=True) -> Iterator[Symbol]:
         for sym in self.iter_syms(name, only_public=only_public, include_imports=include_imports):
-            if sym.type.kind in callable_types:
+            if sym.type.is_callable_type():
                 yield sym
 
     def _lookup_impl(self, name: str, shallow=False) -> Symbol:
@@ -815,6 +860,11 @@ class Scope:
         result = Symbol(self.module_graph.sym_id_gen.next(), name=name, source_module=self.module)
         self.inject(result)
         return result
+
+    def put_alias(self, name: str) -> Symbol:
+        sym = self.put(name)
+        sym.type = Type(TypeKind.alias, sym)
+        return sym
 
     def put_function(self, name: str, type: Type) -> Symbol:
         assert type.kind == TypeKind.function
@@ -1081,7 +1131,7 @@ class CompCtx:
                     raise SerqInternalError("Unsupported empty literal")
 
         if expected_type != None:
-            if expected_type.kind in free_infer_types:
+            if expected_type.is_free_infer_type():
                 expected_type = self.current_scope.lookup_type(lookup_name, shallow=False)
             else:
                 if not expected_type.types_compatible(Type(literal_kind, sym=None)):
@@ -1132,20 +1182,20 @@ class CompCtx:
 
             if not lhs.type.types_compatible(rhs.type):
                 # TODO: Error reporting
-                tl = lhs.type.instantiate_literal(self.graph) if lhs.type.kind in literal_types else lhs.type
-                tr = rhs.type.instantiate_literal(self.graph) if rhs.type.kind in literal_types else rhs.type
+                tl = lhs.type.instantiate_literal(self.graph) if lhs.type.is_literal_type() else lhs.type
+                tr = rhs.type.instantiate_literal(self.graph) if rhs.type.is_literal_type() else rhs.type
                 raise ValueError(f"Incompatible values in binary expression: `{lhs.render()}`:{tl.render()} {op} `{rhs.render()}`:{tr.render()}")
 
             # Type coercion. Revisits "broken" nodes and tries to apply the new info on them
             # TODO: Parts of this should probably be pulled into a new function
-            expr_type: Type = lhs.type if lhs.type.kind not in literal_types else rhs.type
+            expr_type: Type = lhs.type if not lhs.type.is_literal_type() else rhs.type
 
             # if there is a known type, spread it around
-            if lhs.type.kind in literal_types and rhs.type.kind not in literal_types:
+            if lhs.type.is_literal_type() and not rhs.type.is_literal_type():
                 lhs = self.expression(tree.children[0], rhs.type)
                 if isinstance(lhs, NodeOptions):
                     lhs = lhs.use_first()
-            elif rhs.type.kind in literal_types and lhs.type.kind not in literal_types:
+            elif rhs.type.is_literal_type() and not lhs.type.is_literal_type():
                 rhs = self.expression(tree.children[2], lhs.type)
                 if isinstance(rhs, NodeOptions):
                     rhs = rhs.use_first()
@@ -1182,44 +1232,44 @@ class CompCtx:
 
         match op:
             case "plus":
-                assert expr_type.kind in arith_types
+                assert expr_type.is_arith_type()
                 if both_lit:
                     return type(lhs)(lhs.value + rhs.value, type=lhs.type)
                 return NodePlusExpr(lhs, rhs, type=expr_type)
             case "minus":
-                assert expr_type.kind in arith_types
+                assert expr_type.is_arith_type()
                 if both_lit:
                     return type(lhs)(lhs.value - rhs.value, type=lhs.type)
                 return NodeMinusExpression(lhs, rhs, type=expr_type)
             case "star":
-                assert expr_type.kind in arith_types
+                assert expr_type.is_arith_type()
                 if both_lit:
                     return type(lhs)(lhs.value * rhs.value, type=lhs.type)
                 return NodeMulExpression(lhs, rhs, type=expr_type)
             case "slash":
-                assert expr_type.kind in arith_types
+                assert expr_type.is_arith_type()
                 if both_lit:
                     return type(lhs)(lhs.value / rhs.value, type=lhs.type)
                 return NodeDivExpression(lhs, rhs, type=expr_type)
 
             case "modulus":
-                assert expr_type.kind in int_types
+                assert expr_type.is_int_type()
                 if both_lit:
                     return type(lhs)(lhs.value % rhs.value, type=lhs.type)
                 return NodeModExpression(lhs, rhs, type=expr_type)
 
             case "and":
-                assert expr_type.kind in logical_types
+                assert expr_type.is_logical_type()
                 if both_lit:
-                    if lhs.type.kind in arith_types:
+                    if lhs.type.is_arith_type():
                         return type(lhs)(lhs.value & rhs.value, type=lhs.type)
                     else:
                         return NodeBoolLit(lhs.value and rhs.value, type=expr_type)
                 return NodeAndExpression(lhs, rhs, type=expr_type)
             case "or":
-                assert expr_type.kind in logical_types
+                assert expr_type.is_logical_type()
                 if both_lit:
-                    if lhs.type.kind in arith_types:
+                    if lhs.type.is_arith_type():
                         return type(lhs)(lhs.value | rhs.value, type=lhs.type)
                     else:
                         return NodeBoolLit(lhs.value or rhs.value, type=expr_type)
@@ -1235,22 +1285,22 @@ class CompCtx:
                 return NodeNotEqualsExpression(lhs, rhs, type=self.current_scope.lookup_type("bool"))
             case "less":
                 # TODO: Ordinal types.
-                assert expr_type.kind in arith_types
+                assert expr_type.is_arith_type()
                 if both_lit:
                     return NodeBoolLit(lhs.value < rhs.value, type=self.current_scope.lookup_type("bool"))
                 return NodeLessExpression(lhs, rhs, type=self.current_scope.lookup_type("bool"))
             case "lesseq":
-                assert expr_type.kind in arith_types
+                assert expr_type.is_arith_type()
                 if both_lit:
                     return NodeBoolLit(lhs.value <= rhs.value, type=self.current_scope.lookup_type("bool"))
                 return NodeLessEqualsExpression(lhs, rhs, type=self.current_scope.lookup_type("bool"))
             case "greater":
-                assert expr_type.kind in arith_types
+                assert expr_type.is_arith_type()
                 if both_lit:
                     return NodeBoolLit(lhs.value > rhs.value, type=self.current_scope.lookup_type("bool"))
                 return NodeGreaterExpression(lhs, rhs, type=self.current_scope.lookup_type("bool"))
             case "greatereq":
-                assert expr_type.kind in arith_types
+                assert expr_type.is_arith_type()
                 if both_lit:
                     return NodeBoolLit(lhs.value >= rhs.value, type=self.current_scope.lookup_type("bool"))
                 return NodeGreaterEqualsExpression(lhs, rhs, type=self.current_scope.lookup_type("bool"))
@@ -1301,6 +1351,8 @@ class CompCtx:
 
         res = NodeOptions(self.get_unit_type()) # TODO: Could use an error type to ensure consistent analysis later
         for sym in self.current_scope.iter_syms(val, include_imports=True):
+            if sym.type.is_alias():
+                sym = sym.definition_node.skip_safe_aliases()
             res.options.append(NodeSymbol(sym, sym.type))
 
         if len(res.options) > 0:
@@ -1383,12 +1435,12 @@ class CompCtx:
                 # TODO: Error reporting
                 raise ValueError(f"Variable type {type_sym.symbol.name} is not compatible with value of type {val_node.type.sym.render()}")
             else:
-                assert val_node.type.kind not in literal_types
+                assert not val_node.type.is_literal_type()
             # no need to resem the node, it should already be with the current type resolution
         else:
             # infer type from value
             # TODO: Instantiate types, for now only literals
-            if val_node.type.kind in builtin_userspace_types or val_node.type.kind == TypeKind.struct:
+            if val_node.type.kind in builtin_userspace_types or val_node.type.kind in [TypeKind.struct, TypeKind.alias]:
                 resolved_type = val_node.type
             else:
                 # Literals infer their own types to the default if told to do so
@@ -1425,18 +1477,13 @@ class CompCtx:
         assert expected_type.kind == TypeKind.unit
 
         src = self.identifier(tree.children[1], None)
-
-        alias_name = tree.children[0].children[0].value
-        alias_sym = self.current_scope.put(alias_name)
-
         unambig_node = src.extract_unambiguous()
-        alias_sym.type = unambig_node.type
         if not isinstance(unambig_node, NodeSymbol):
             raise ValueError("Taking an alias of something that isn't a symbol isn't allowed")
-        alias_sym.mutable = unambig_node.symbol.mutable
-        alias_sym.magic = unambig_node.symbol.magic
-        # TODO: Exporting aliases
-        # alias_sym.exported = ...
+
+        alias_name = tree.children[0].children[0].value
+        alias_sym = self.current_scope.put_alias(alias_name)
+        alias_sym.type.base = unambig_node.type
 
         res_node = NodeAliasDefinition(alias_sym, unambig_node.symbol, self.get_unit_type())
         alias_sym.definition_node = res_node
@@ -1504,7 +1551,7 @@ class CompCtx:
                 assert False, f"Returning a unit type for expected type {sym.type.return_type().sym.render()} is not permitted"
             elif isinstance(last_body_node, NodeReturn):
                 pass # return is already checked
-            elif last_body_node.type.kind in literal_types:
+            elif last_body_node.type.is_literal_type():
                 body = self.handle_block(tree.children[3], body)
                 last_body_node = body.children[-1]
                 if last_body_node.type.kind in builtin_userspace_types:
@@ -1611,7 +1658,7 @@ class CompCtx:
                                     if not resolved_arg.type.types_compatible(formal_type):
                                         return []
                                     params.append(resolved_arg)
-                                except SerqTypeInferError:
+                                except SerqTypeInferError as e:
                                     return []
                             return [NodeFnCall(
                                 callee=callee_node,
@@ -1663,7 +1710,7 @@ class CompCtx:
         idx_op = self.expression(tree.children[1], None) # TODO: Any ordinal type
         if isinstance(idx_op, NodeOptions):
             idx_op = idx_op.extract_unambiguous()
-        if idx_op.type.kind not in ordinal_types:
+        if not idx_op.type.is_ordinal_type():
             raise ValueError(f"Indexing without an ordinal type is not allowed {idx_op.render()}: {idx_op.type.render()}")
         return NodeIdxOp(lhs_node, idx_op, lhs_node.type.element_type(self.graph))
 
