@@ -19,6 +19,7 @@
 @magic pub struct bool {}
 
 @magic pub struct string {}
+@magic pub struct char {}
 
 
 

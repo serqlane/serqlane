@@ -22,6 +22,7 @@ let y: int64 = (2 + x)
 ("let x = true and false", "let x: bool = false"),
 ("let x = 1 == 1", "let x: bool = true"),
 ("let x = 1 or 2", "let x: int64 = 3"),
+("let x = '\\n'", "let x: char = '\\n'")
 ]
 
 
