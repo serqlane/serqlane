@@ -1726,6 +1726,14 @@ class CompCtx:
                                 formal_type = callee_node.type.function_arg_types()[i]
                                 try:
                                     resolved_arg = self.expression(unresolved_args[i], formal_type)
+                                    if isinstance(resolved_arg, NodeDotAccess) and isinstance(resolved_arg.rhs, NodeOptions) and isinstance(resolved_arg.rhs.extract_unambiguous(), NodeSymbol):
+                                        resolved_arg = NodeDotAccess(resolved_arg.lhs, resolved_arg.rhs.extract_unambiguous())
+                                    if isinstance(resolved_arg, NodeDotAccess) and isinstance(resolved_arg.rhs, NodeSymbol) and resolved_arg.rhs.symbol.const:
+                                        assert isinstance(resolved_arg.rhs.symbol.definition_node, NodeConst)
+                                        assert isinstance(resolved_arg.rhs.symbol.definition_node.expr, NodeLiteral)
+                                        cnode = resolved_arg.rhs.symbol.definition_node.expr
+                                        if formal_type.types_compatible(cnode.type):
+                                            resolved_arg = type(cnode)(cnode.value, formal_type)
                                     if isinstance(resolved_arg, NodeOptions):
                                         resolved_arg = resolved_arg.use_first()
                                     if not resolved_arg.type.types_compatible(formal_type):
