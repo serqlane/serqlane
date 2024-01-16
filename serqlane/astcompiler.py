@@ -1370,11 +1370,10 @@ class CompCtx:
             if sym.const:
                 assert isinstance(sym.definition_node, NodeConst)
                 assert isinstance(sym.definition_node.expr, NodeLiteral)
-                if expected_type == None or expected_type.types_compatible(sym.definition_node.expr.type):
-                    typ = expected_type if expected_type != None else sym.definition_node.expr.type
-                    if typ.is_free_infer_type() and sym.definition_node.expr.type.is_literal_type():
-                        typ = sym.definition_node.expr.type.instantiate_literal(self.graph)
-                    res.options.append(type(sym.definition_node.expr)(sym.definition_node.expr.value, typ))
+                typ = expected_type if expected_type != None else sym.definition_node.expr.type
+                if typ.is_free_infer_type() and sym.definition_node.expr.type.is_literal_type():
+                    typ = sym.definition_node.expr.type.instantiate_literal(self.graph)
+                res.options.append(type(sym.definition_node.expr)(sym.definition_node.expr.value, typ))
             else:
                 res.options.append(NodeSymbol(sym, sym.type))
 
@@ -1488,12 +1487,23 @@ class CompCtx:
         ident = ident_node.children[0].value
 
         type_sym = None if tree.children[1] == None else self.user_type(tree.children[1])
-        val_node = self.expression(tree.children[2], type_sym.type if type_sym != None else None)
+        val_node = self.expression(tree.children[2], None)
+        if isinstance(val_node, NodeOptions):
+            val_node = val_node.extract_unambiguous()
+        if isinstance(val_node, NodeSymbol) and val_node.symbol.const:
+            assert isinstance(val_node.symbol.definition_node, NodeConst)
+            assert isinstance(val_node.symbol.definition_node.expr, NodeLiteral)
+            cnode = val_node.symbol.definition_node.expr
+            val_node = type(cnode)(cnode.value, cnode.type)
         if not isinstance(val_node, NodeLiteral):
             raise ValueError("Consts only permit literal expressions right now")
+        if type_sym != None:
+            if not val_node.type.types_compatible(type_sym.type):
+                raise SerqTypeInferError(f"Incompatible types in const statement: {type_sym.type.kind} = {val_node.type.kind}")
+            val_node.type = type_sym.type
 
         sym = self.current_scope.put_let(ident, mutable=False)
-        sym.type = val_node.type
+        sym.type = val_node.type if type_sym == None else type_sym.type
         sym.const = True
 
         res = NodeConst(
