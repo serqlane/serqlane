@@ -119,7 +119,11 @@ class NodeBoolLit(NodeLiteral[bool]):
 
 class NodeStringLit(NodeLiteral[str]):
     def render(self) -> str:
-        return f"\"{self.value}\""
+        return f"\"{self.value.encode("unicode_escape").decode("utf-8")}\""
+
+class NodeCharLit(NodeLiteral[str]):
+    def render(self) -> str:
+        return f"'{self.value.encode("unicode_escape").decode("utf-8")}'"
 
 class NodeLet(Node):
     def __init__(self, sym_node: NodeSymbol, expr: Node, type: Type):
@@ -403,6 +407,7 @@ class TypeKind(Enum):
     literal_float = auto()
     literal_bool = auto()
     literal_string = auto()
+    literal_char = auto()
 
     unit = auto() # zero sized type
 
@@ -461,6 +466,7 @@ literal_types = frozenset([
     TypeKind.literal_float,
     TypeKind.literal_bool,
     TypeKind.literal_string,
+    TypeKind.literal_char,
 ])
 
 # TODO: Other solution based on operator signatures
@@ -1054,9 +1060,6 @@ class CompCtx:
                 case _:
                     raise SerqInternalError("Unsupported empty literal")
 
-        if literal_kind is TypeKind.literal_string:
-            value = self.resolve_escape_sequence(value)
-
         if expected_type != None:
             if expected_type.kind in free_infer_types:
                 expected_type = self.current_scope.lookup_type(lookup_name, shallow=False)
@@ -1066,10 +1069,6 @@ class CompCtx:
             return node_type(value=value, type=expected_type)
         else:
             return node_type(value=value, type=Type(literal_kind, sym=None))
-
-    @staticmethod
-    def resolve_escape_sequence(value: str) -> str:
-        return bytes(value, "utf-8").decode("unicode_escape")
 
     def integer(self, tree: Tree, expected_type: Type) -> NodeIntLit:
         assert tree.data == "integer", tree.data
@@ -1082,10 +1081,14 @@ class CompCtx:
     def bool(self, tree: Tree, expected_type: Type) -> NodeBoolLit:
         assert tree.data == "bool", tree.data
         return self.handle_literal(tree, expected_type, "bool", TypeKind.literal_bool, NodeBoolLit, lambda x: x == "true")
-    
+
     def string(self, tree: Tree, expected_type: Type) -> NodeStringLit:
         assert tree.data == "string", tree.data
         return self.handle_literal(tree, expected_type, "string", TypeKind.literal_string, NodeStringLit, str)
+
+    def char(self, tree: Tree, expected_type: Type) -> NodeCharLit:
+        assert tree.data == "char", tree.data
+        return self.handle_literal(tree, expected_type, "char", TypeKind.literal_char, NodeCharLit, str)
 
 
     def binary_expression(self, tree: Tree, expected_type: Type) -> NodeBinaryExpr:
@@ -1655,7 +1658,9 @@ class CompCtx:
                     result.append(self.decimal(child, expected_type))
                 case "string":
                     result.append(self.string(child, expected_type))
-                
+                case "char":
+                    result.append(self.char(child, expected_type))
+
                 case "identifier":
                     result.append(self.identifier(child, expected_type))
                 case _:

@@ -181,6 +181,7 @@ class SerqParser:
             SqTokenKind.INTEGER,
             SqTokenKind.DECIMAL,
             SqTokenKind.STRING,
+            SqTokenKind.CHAR,
             SqTokenKind.TRUE,
             SqTokenKind.FALSE,
             SqTokenKind.IDENTIFIER,
@@ -194,7 +195,7 @@ class SerqParser:
             case SqTokenKind.INTEGER | SqTokenKind.DECIMAL:
                 name = x.kind.name.lower()
                 res = Tree(name, children=[Token(name, x.literal)])
-            case SqTokenKind.STRING:
+            case SqTokenKind.STRING | SqTokenKind.CHAR:
                 name = x.kind.name.lower()
                 res = Tree(name, children=[Token(name, x.literal[1:-1])])
             case SqTokenKind.TRUE | SqTokenKind.FALSE:
