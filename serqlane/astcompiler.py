@@ -343,6 +343,15 @@ class NodeFnCall(Node):
         args = ", ".join([x.render() for x in self.args])
         return f"{self.original_callee.render()}({args})"
 
+class NodeIdxOp(Node):
+    def __init__(self, lhs: Node, idx: Node, type: Type) -> None:
+        super().__init__(type)
+        self.lhs = lhs
+        self.idx = idx
+    
+    def render(self) -> str:
+        return f"{self.lhs.render()}[{self.idx.render()}]"
+
 class NodeImport(Node):
     def __init__(self, module_sym: Symbol, orig_path: str, type: Type) -> None:
         super().__init__(type)
@@ -456,6 +465,10 @@ int_types = frozenset([
     TypeKind.uint64,
 ])
 
+ordinal_types = frozenset([
+    TypeKind.literal_int,
+] + list(int_types))
+
 float_types = frozenset([
     TypeKind.float32,
     TypeKind.float64,
@@ -509,6 +522,17 @@ class Type:
     def return_type(self) -> Type:
         assert self.kind == TypeKind.function
         return self.data[1]
+    
+    def is_indexable(self) -> bool:
+        return self.kind in [TypeKind.string, TypeKind.literal_string]
+    
+    def element_type(self, graph: ModuleGraph) -> Type:
+        assert self.is_indexable()
+        match self.kind:
+            case TypeKind.string | TypeKind.literal_string:
+                return graph.request_module(MAGIC_MODULE_NAME).global_scope.lookup_type("char")
+            case _:
+                raise NotImplementedError()
 
     def function_def_args_identical(self, other: Type) -> bool:
         assert self.kind == TypeKind.function and other.kind == TypeKind.function
@@ -1633,6 +1657,20 @@ class CompCtx:
             raise ValueError(f"No matching overload found for {tree.children[0].children[0].children[0].value}")
         return call
 
+    def idx_op(self, tree: Tree) -> NodeIdxOp:
+        assert tree.data == "idx_op", tree.data
+        lhs_node = self.expression(tree.children[0], None)
+        if isinstance(lhs_node, NodeOptions):
+            lhs_node = lhs_node.extract_unambiguous()
+        if not lhs_node.type.is_indexable():
+            raise ValueError(f"Tried indexing into a non-indexable expression: {lhs_node.render()}: {lhs_node.type.render()}")
+        idx_op = self.expression(tree.children[1], None) # TODO: Any ordinal type
+        if isinstance(idx_op, NodeOptions):
+            idx_op = idx_op.extract_unambiguous()
+        if idx_op.type.kind not in ordinal_types:
+            raise ValueError(f"Indexing without an ordinal type is not allowed {idx_op.render()}: {idx_op.type.render()}")
+        return NodeIdxOp(lhs_node, idx_op, lhs_node.type.element_type(self.graph))
+
     def expression(self, tree: Tree, expected_type: Type) -> Node:
         assert tree.data == "expression", tree.data
         assert len(tree.children) == 1
@@ -1642,6 +1680,8 @@ class CompCtx:
             match child.data:
                 case "fn_call_expr":
                     result.append(self.fn_call_expr(child, expected_type))
+                case "idx_op":
+                    result.append(self.idx_op(child))
                 case "binary_expression":
                     result.append(self.binary_expression(child, expected_type))
                 case "block_expression":
