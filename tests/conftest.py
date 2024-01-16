@@ -28,7 +28,7 @@ def serq_module(module_graph: ModuleGraph) -> Callable[[str], Module]:
     def execute(code: str):
         clear_graph(module_graph)
         return module_graph.load("<string>", code)
-    
+
     return execute
 
 
@@ -68,7 +68,7 @@ def multimodule_executor(module_graph: ModuleGraph) -> Callable[[ModuleMap], Ser
         main_module = module_graph.load("main", file_contents=modules["main"])
         vm.execute_module(main_module)
         return vm
-    
+
     return execute
 
 
@@ -83,14 +83,14 @@ def capture_first_debug(executor) -> Callable[[str], Any]:
             nonlocal captured
             if not isinstance(captured, MISSING):
                 raise RuntimeError("dbg called twice")
-            
+
             captured = value
 
         executor(code, debug_hook=_debug_hook)
 
         if isinstance(captured, MISSING):
             raise RuntimeError("dbg not called")
-        
+
         return captured
 
     return execute_and_capture
@@ -107,14 +107,14 @@ def multimodule_capture_first_debug(multimodule_executor) -> Callable[[ModuleMap
             nonlocal captured
             if not isinstance(captured, MISSING):
                 raise RuntimeError("dbg called twice")
-            
+
             captured = value
 
         multimodule_executor(modules, debug_hook=_debug_hook)
 
         if isinstance(captured, MISSING):
             raise RuntimeError("dbg not called")
-        
+
         return captured
 
     return execute_and_capture

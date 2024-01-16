@@ -197,7 +197,7 @@ class SerqVM:
                     else:
                         self.debug_hook(val)
                     return Unit()
-                
+
                 elif expression.callee.symbol.name == "panic": # type: ignore
                      raise PanicError()
 
@@ -205,7 +205,7 @@ class SerqVM:
                 elif isinstance(
                     expression.callee.symbol.definition_node, # type: ignore
                     NodeStructDefinition
-                ):  
+                ):
                     assert isinstance(expression.callee, NodeSymbol)
 
                     try:
@@ -278,7 +278,7 @@ class SerqVM:
 
             case NodeAliasDefinition():
                 return expression.src
-            
+
             case NodeIdxOp():
                 left = self.eval(expression.lhs)
                 idx = self.eval(expression.idx)

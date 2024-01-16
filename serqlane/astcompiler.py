@@ -73,12 +73,12 @@ class NodeOptions(Node):
     def __init__(self, type: Type) -> None:
         super().__init__(type)
         self.options: list[Node] = []
-    
+
     def extract_unambiguous(self) -> Node:
         if len(self.options) != 1:
             raise ValueError(f"Failed to extract an unambiguous node: {[x.render() for x in self.options]}")
         return self.use_first()
-    
+
     def use_first(self) -> Node:
         assert len(self.options) > 0
         return self.options[0]
@@ -149,7 +149,7 @@ class NodeGrouped(Node):
     def __init__(self, inner: Node, type: Type) -> None:
         super().__init__(type)
         self.inner = inner
-    
+
     def render(self) -> str:
         return f"({self.inner.render()})"
 
@@ -200,7 +200,7 @@ class NodeEqualsExpression(NodeBinaryExpr):
 class NodeNotEqualsExpression(NodeBinaryExpr):
     def render(self) -> str:
         return f"({self.lhs.render()} != {self.rhs.render()})"
-    
+
 class NodeLessExpression(NodeBinaryExpr):
     def render(self) -> str:
         return f"({self.lhs.render()} < {self.rhs.render()})"
@@ -208,7 +208,7 @@ class NodeLessExpression(NodeBinaryExpr):
 class NodeLessEqualsExpression(NodeBinaryExpr):
     def render(self) -> str:
         return f"({self.lhs.render()} <= {self.rhs.render()})"
-    
+
 class NodeGreaterExpression(NodeBinaryExpr):
     def render(self) -> str:
         return f"({self.lhs.render()} > {self.rhs.render()})"
@@ -250,7 +250,7 @@ class NodeWhileStmt(Node):
         super().__init__(type)
         self.cond_expr = cond_expr
         self.body = body
-    
+
     def render(self) -> str:
         cond = self.cond_expr.render()
         body = self.body.render()
@@ -348,7 +348,7 @@ class NodeIdxOp(Node):
         super().__init__(type)
         self.lhs = lhs
         self.idx = idx
-    
+
     def render(self) -> str:
         return f"{self.lhs.render()}[{self.idx.render()}]"
 
@@ -410,7 +410,7 @@ class TypeKind(Enum):
     error = auto() # bad type
     infer = auto() # marker type to let nodes know to infer their own types
     magic = auto() # TODO: Get rid of later. Exists to make compiler magics work for debugging
- 
+
     # literal types, haven't yet been matched
     literal_int = auto()
     literal_float = auto()
@@ -522,10 +522,10 @@ class Type:
     def return_type(self) -> Type:
         assert self.kind == TypeKind.function
         return self.data[1]
-    
+
     def is_indexable(self) -> bool:
         return self.kind in [TypeKind.string, TypeKind.literal_string]
-    
+
     def element_type(self, graph: ModuleGraph) -> Type:
         assert self.is_indexable()
         match self.kind:
@@ -559,11 +559,11 @@ class Type:
         match self.kind:
             case TypeKind.error:
                 return False
-            
+
             # TODO: Not sure what to do about these
             case TypeKind.unit:
                 return self.kind == other.kind
-            
+
             case TypeKind.function:
                 raise NotImplementedError() # TODO
 
@@ -572,7 +572,7 @@ class Type:
             case TypeKind.char | TypeKind.pointer:
                 return self.kind == other.kind
             case TypeKind.bool:
-                return self.kind == other.kind or other.kind == TypeKind.literal_bool    
+                return self.kind == other.kind or other.kind == TypeKind.literal_bool
             case TypeKind.int8 | TypeKind.uint8 | TypeKind.int16 | TypeKind.uint16 | TypeKind.int32 | TypeKind.uint32 | TypeKind.int64 | TypeKind.uint64:
                 return self.kind == other.kind or other.kind == TypeKind.literal_int
             case TypeKind.float32 | TypeKind.float64:
@@ -584,12 +584,12 @@ class Type:
                 if self.kind != other.kind:
                     return False
                 return self.data.compare(other.data)
-            
+
             case TypeKind.array:
                 if self.kind != other.kind:
                     return False
                 return self.data[0].compare(other.data[0]) and self.data[1].compare(other.data[0])
-            
+
             case TypeKind.static:
                 # TODO: static is allowed to be turned into the corresponding non-static version but not vice versa
                 raise SerqInternalError("statics aren't ready yet")
@@ -597,11 +597,11 @@ class Type:
             case TypeKind.alias:
                 # TODO: Generic aliases. Need to map potentially new generic params around and then reduce the type if required
                 raise SerqInternalError("aliases aren't ready yet")
-            
+
             case TypeKind.distinct:
                 # TODO: distinct generics are tough
                 raise SerqInternalError("distincts aren't ready yet")
-            
+
 
             # user types
 
@@ -683,7 +683,7 @@ class Scope:
         if self.older_sibling != None:
             return self.older_sibling.get_oldest_sibling()
         return self
-    
+
     def iter_module_imports(self, module: Module) -> Iterator[Symbol]:
         oldest = self.get_oldest_sibling()
         for sym in oldest._imported_syms.get(module, []):
@@ -761,7 +761,7 @@ class Scope:
             if older.older_sibling == None:
                 break
             older = older.older_sibling
-        
+
         # import lookup
         # happens quite late because local syms are always preferred
         if include_imports:
@@ -815,7 +815,7 @@ class Scope:
         result = Symbol(self.module_graph.sym_id_gen.next(), name=name, source_module=self.module)
         self.inject(result)
         return result
-    
+
     def put_function(self, name: str, type: Type) -> Symbol:
         assert type.kind == TypeKind.function
         for fn in self.iter_function_defs(name):
@@ -843,7 +843,7 @@ class Scope:
         sym = self.put_magic(kind.name)
         sym.type = Type(kind=kind, sym=sym)
         return sym
-    
+
     def put_struct(self, name: str) -> Symbol:
         sym = self.put(name)
         sym.type = Type(kind=TypeKind.struct, sym=sym)
@@ -887,7 +887,7 @@ class CompCtx:
         self.graph = graph
         self.current_scope = self.module.global_scope
         self.in_loop_counter = 0
-        
+
         # deferred body mode
         self.handling_deferred_fn_body = False
         self.current_deferred_ret_type: Optional[Type] = None
@@ -938,7 +938,7 @@ class CompCtx:
                 return self.while_stmt(child, expected_type)
             case "break_stmt" | "continue_stmt":
                 return self.handle_break_or_continue(child, expected_type)
-            case "block_stmt": 
+            case "block_stmt":
                 return self.handle_block(child, expected_type)
             case "import_stmt":
                 return self.handle_import(child)
@@ -1070,7 +1070,7 @@ class CompCtx:
     def handle_literal(self, tree: Tree, expected_type: Type, lookup_name: str, literal_kind: TypeKind, node_type: type[NodeLiteral], conv_fn):
         if len(tree.children) > 0:
             value = conv_fn(tree.children[0].value)
-        
+
         # empty literals i.e. "" or []
         else:
             # match so it's easy to add new ones
@@ -1093,11 +1093,11 @@ class CompCtx:
     def integer(self, tree: Tree, expected_type: Type) -> NodeIntLit:
         assert tree.data == "integer", tree.data
         return self.handle_literal(tree, expected_type, "int64", TypeKind.literal_int, NodeIntLit, int)
-    
+
     def decimal(self, tree: Tree, expected_type: Type) -> NodeFloatLit:
         assert tree.data == "decimal", tree.data
         return self.handle_literal(tree, expected_type, "float64", TypeKind.literal_float, NodeFloatLit, float)
-    
+
     def bool(self, tree: Tree, expected_type: Type) -> NodeBoolLit:
         assert tree.data == "bool", tree.data
         return self.handle_literal(tree, expected_type, "bool", TypeKind.literal_bool, NodeBoolLit, lambda x: x == "true")
@@ -1135,8 +1135,8 @@ class CompCtx:
                 tl = lhs.type.instantiate_literal(self.graph) if lhs.type.kind in literal_types else lhs.type
                 tr = rhs.type.instantiate_literal(self.graph) if rhs.type.kind in literal_types else rhs.type
                 raise ValueError(f"Incompatible values in binary expression: `{lhs.render()}`:{tl.render()} {op} `{rhs.render()}`:{tr.render()}")
-            
-            # Type coercion. Revisits "broken" nodes and tries to apply the new info on them 
+
+            # Type coercion. Revisits "broken" nodes and tries to apply the new info on them
             # TODO: Parts of this should probably be pulled into a new function
             expr_type: Type = lhs.type if lhs.type.kind not in literal_types else rhs.type
 
@@ -1173,7 +1173,7 @@ class CompCtx:
                         rhs = rhs.use_first()
                     assert lhs.type.types_compatible(rhs.type)
                     expr_type = lhs.type
-                
+
                 # there is an expected type but the expression isn't compatible with it
                 else:
                     # Assume it's fine, it should be checked outside of here
@@ -1201,13 +1201,13 @@ class CompCtx:
                 if both_lit:
                     return type(lhs)(lhs.value / rhs.value, type=lhs.type)
                 return NodeDivExpression(lhs, rhs, type=expr_type)
-            
+
             case "modulus":
                 assert expr_type.kind in int_types
                 if both_lit:
                     return type(lhs)(lhs.value % rhs.value, type=lhs.type)
                 return NodeModExpression(lhs, rhs, type=expr_type)
-            
+
             case "and":
                 assert expr_type.kind in logical_types
                 if both_lit:
@@ -1224,7 +1224,7 @@ class CompCtx:
                     else:
                         return NodeBoolLit(lhs.value or rhs.value, type=expr_type)
                 return NodeOrExpression(lhs, rhs, type=expr_type)
-            
+
             case "equals":
                 if both_lit:
                     return NodeBoolLit(lhs.value == rhs.value, type=self.current_scope.lookup_type("bool"))
@@ -1342,7 +1342,7 @@ class CompCtx:
                     report_immutable(leftmost.symbol)
             case _:
                 raise NotImplementedError()
-        
+
         return NodeAssignment(lhs, rhs, self.get_unit_type())
 
     def let_stmt(self, tree: Tree, expected_type: Type) -> NodeLet:
@@ -1367,7 +1367,7 @@ class CompCtx:
             type_tree = tree.children[f]
             type_sym = self.user_type(type_tree)
             f += 1
-        
+
         val_node_expected_type = type_sym.type if type_sym != None else self.get_infer_type()
         val_node = self.expression(tree.children[f], val_node_expected_type)
         if isinstance(val_node, NodeOptions):
@@ -1387,7 +1387,7 @@ class CompCtx:
             # no need to resem the node, it should already be with the current type resolution
         else:
             # infer type from value
-            # TODO: Instantiate types, for now only literals            
+            # TODO: Instantiate types, for now only literals
             if val_node.type.kind in builtin_userspace_types or val_node.type.kind == TypeKind.struct:
                 resolved_type = val_node.type
             else:
@@ -1428,7 +1428,7 @@ class CompCtx:
 
         alias_name = tree.children[0].children[0].value
         alias_sym = self.current_scope.put(alias_name)
-        
+
         unambig_node = src.extract_unambiguous()
         alias_sym.type = unambig_node.type
         if not isinstance(unambig_node, NodeSymbol):
@@ -1490,7 +1490,7 @@ class CompCtx:
         def_node = NodeStructDefinition(sym, fields, self.get_unit_type())
         sym.definition_node = def_node
         return def_node
-    
+
     def handle_deferred_fn_body(self, tree: Tree, sym: Symbol) -> NodeBlockStmt:
         self.current_deferred_ret_type = sym.type.return_type()
 
@@ -1554,7 +1554,7 @@ class CompCtx:
 
         # must open a scope here to isolate the params
         self.open_scope()
-        
+
         args_node = self.fn_definition_args(tree.children[2], self.get_unit_type())
         ret_type_node = NodeSymbol(self.get_unit_type().sym, self.get_unit_type())
         ret_type = ret_type_node.type
@@ -1774,7 +1774,7 @@ class ModuleGraph:
         if isinstance(path, str):
             path = pathlib.Path(path).with_suffix(".serq").absolute()
         name = path.with_suffix("").name
-        
+
         assert path not in self.modules
         mod = Module(name, self._next_id, file_contents, self)
 
@@ -1799,7 +1799,7 @@ class ModuleGraph:
             ctx.current_scope = fn[2]
             body = ctx.handle_deferred_fn_body(fn[1], fn[0])
             fn[0].definition_node.body = body
-        
+
         ctx.current_scope = old_scope
         ctx.handling_deferred_fn_body = False
 
