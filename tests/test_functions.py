@@ -36,7 +36,7 @@ dbg(x)
 def test_variable_shadowing(capture_first_debug):
     code = """
 alias int = int64
-    
+
 let x = 1
 
 fn foo(x: int) -> int {
@@ -131,7 +131,7 @@ fn abc(a: int, b: string) -> int {
 }
 
 dbg(abc(1))
-""", 1) 
+""", 1)
 ]
 
 
@@ -146,7 +146,7 @@ forward_calls_tests_passing = [
 fn a() {
  b()
 }
- 
+
 fn b() {
  dbg(1)
 }
@@ -177,7 +177,7 @@ b()
 
 fn b() {}
 """
-] 
+]
 
 
 @pytest.mark.parametrize("code,expected", forward_calls_tests_passing)

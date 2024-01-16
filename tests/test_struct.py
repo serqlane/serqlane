@@ -100,7 +100,7 @@ struct Abc {
 pub fn make_abc() -> Abc {Abc()}
 """},{"main": """
 import other
-      
+
 let abc = other.Abc()
 let x = abc.x
 """, "other": """
