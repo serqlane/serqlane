@@ -142,9 +142,10 @@ class NodeConst(Node):
         self.expr = expr
 
     def render(self) -> str:
+        pub_str = "pub " if self.sym_node.symbol.public else ""
         val_t = self.sym_node.type
         type_str = f": {val_t.render()}" if not val_t.is_literal_type() else ""
-        return f"const {self.sym_node.render()}{type_str} = {self.expr.render()}"
+        return f"{pub_str}const {self.sym_node.render()}{type_str} = {self.expr.render()}"
 
 class NodeAssignment(Node):
     def __init__(self, lhs: Node, rhs: Node, type: Type) -> None:
@@ -1482,12 +1483,14 @@ class CompCtx:
 
     def const_stmt(self, tree: Tree) -> NodeConst:
         assert tree.data == "const_stmt", tree.data
-        ident_node = tree.children[0]
+        ident_node = tree.children[1]
         assert ident_node.data == "identifier"
         ident = ident_node.children[0].value
 
-        type_sym = None if tree.children[1] == None else self.user_type(tree.children[1])
-        val_node = self.expression(tree.children[2], None)
+        is_pub = tree.children[0] != None
+
+        type_sym = None if tree.children[2] == None else self.user_type(tree.children[2])
+        val_node = self.expression(tree.children[3], None)
         if isinstance(val_node, NodeOptions):
             val_node = val_node.extract_unambiguous()
         if isinstance(val_node, NodeSymbol) and val_node.symbol.const:
@@ -1505,6 +1508,7 @@ class CompCtx:
         sym = self.current_scope.put_let(ident, mutable=False)
         sym.type = val_node.type if type_sym == None else type_sym.type
         sym.const = True
+        sym.public = is_pub
 
         res = NodeConst(
             sym_node=NodeSymbol(sym, sym.type),

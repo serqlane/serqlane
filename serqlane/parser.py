@@ -314,7 +314,8 @@ class SerqParser:
 
     def _eat_const(self) -> Tree:
         self.expect([SqTokenKind.CONST])
-        res = Tree("const_stmt")
+        res = Tree("const_stmt", children=[self._cur_pub])
+        self._cur_pub = None
         res.add(self._eat_identifier())
 
         if self.peek(0).kind == SqTokenKind.COLON:
@@ -471,7 +472,7 @@ class SerqParser:
 
         if self._cur_decorator != None and tok.kind not in [SqTokenKind.FN, SqTokenKind.STRUCT, SqTokenKind.PUB]:
             raise ParserError(f"Invalid token for decorator: {tok.kind}")
-        if self._cur_pub != None and tok.kind not in [SqTokenKind.FN, SqTokenKind.STRUCT]:
+        if self._cur_pub != None and tok.kind not in [SqTokenKind.FN, SqTokenKind.STRUCT, SqTokenKind.CONST]:
             raise ParserError(f"Invalid token for pub: {tok.kind}")
 
         match tok.kind:
