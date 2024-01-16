@@ -132,7 +132,7 @@ class SerqParser:
         self.expect([SqTokenKind.CLOSE_PAREN])
         if len(result.children) == 0:
             result.add(None)
-        return result
+        return result        
 
     def _eat_operator(self) -> Token:
         op = self.expect([
@@ -217,6 +217,11 @@ class SerqParser:
             args = self._eat_function_args()
             lhs = res
             res = Tree("fn_call_expr", children=[lhs, args])
+        elif self.peek(0).kind == SqTokenKind.OPEN_SQUARE:
+            self.expect([SqTokenKind.OPEN_SQUARE])
+            idx_expr = self._eat_expression()
+            self.expect([SqTokenKind.CLOSE_SQUARE])
+            res = Tree("idx_op", children=[res, idx_expr])
         return self._wrap_expr(res)
 
     def _descend_unary_expr(self) -> Tree:

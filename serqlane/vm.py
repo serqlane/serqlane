@@ -278,6 +278,11 @@ class SerqVM:
 
             case NodeAliasDefinition():
                 return expression.src
+            
+            case NodeIdxOp():
+                left = self.eval(expression.lhs)
+                idx = self.eval(expression.idx)
+                return left[idx]
 
             case _:
                 raise NotImplementedError(f"{expression=}")
