@@ -161,8 +161,7 @@ class SerqParser:
                 | SqTokenKind.EQUALS | SqTokenKind.NOT_EQUALS \
                 | SqTokenKind.GREATER | SqTokenKind.GREATEREQ | SqTokenKind.LESS | SqTokenKind.LESSEQ \
                 | SqTokenKind.AND | SqTokenKind.OR \
-                | SqTokenKind.DOT \
-                | SqTokenKind.NOT:
+                | SqTokenKind.DOT:
                 return Token(op.kind.name.lower(), op.kind.value)
             case _:
                 raise NotImplementedError(op.kind)
@@ -235,7 +234,7 @@ class SerqParser:
             return self._descend_atom_expr()
 
     def _descend_dot_expr(self) -> Tree:
-        expr = self._descend_unary_expr()
+        expr = self._descend_atom_expr()
         while self.peek(0).kind == SqTokenKind.DOT:
             op = self._eat_operator()
             rhs = self._eat_identifier()

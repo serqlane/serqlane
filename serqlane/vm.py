@@ -130,23 +130,6 @@ class SerqVM:
 
         return SerqStruct
 
-    def eval_unary_expression(self, expression: NodeUnaryExpression) -> Any:
-        match expression:
-            case NodeNotExpression():
-                expr = self.eval(expression.expr)
-                if expression.expr.type.is_int_type():
-                    # TODO: Serq vm must use correctly sized integers
-                    return ~expr
-                else:
-                    if expression.type.kind != TypeKind.bool:
-                        raise RuntimeError(f"Got an invalid type for not: {expression.type.kind}")
-                    return not expr
-            case NodeNegExpression():
-                expr = self.eval(expression.expr)
-                return -expr
-            case _:
-                raise NotImplementedError(expression)
-
     def eval_binary_expression(self, expression: NodeBinaryExpr) -> Any:
         match expression:
             case NodePlusExpr():
@@ -196,9 +179,6 @@ class SerqVM:
         match expression:
             case NodeLiteral():
                 return expression.value
-
-            case NodeUnaryExpression():
-                return self.eval_unary_expression(expression)
 
             case NodeBinaryExpr():
                 return self.eval_binary_expression(expression)
