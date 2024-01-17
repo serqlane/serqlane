@@ -229,7 +229,7 @@ class SerqParser:
         expr_or_op = self.peek(0)
         if expr_or_op.kind in [SqTokenKind.MINUS, SqTokenKind.NOT]:
             op = self._eat_operator()
-            rhs = self._descend_unary_expr()
+            rhs = self._descend_cmp_expr() # NOTE: We do not go back to the start of the tree because it will cause issues with associativity
             return self._wrap_expr(Tree("unary_expression", children=[op, rhs]))
         else:
             return self._descend_atom_expr()

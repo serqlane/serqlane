@@ -234,11 +234,11 @@ class NodeUnaryExpression(Node):
 
 class NodeNotExpression(NodeUnaryExpression):
     def render(self) -> str:
-        return f"not {self.expr.render()}"
+        return f"not ({self.expr.render()})"
 
 class NodeNegExpression(NodeUnaryExpression):
     def render(self) -> str:
-        return f"-{self.expr.render()}"
+        return f"-({self.expr.render()})"
 
 
 # others
