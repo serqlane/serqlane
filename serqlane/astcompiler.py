@@ -227,20 +227,6 @@ class NodeDotAccess(Node):
         return f"{self.lhs.render()}.{self.rhs.render()}"
 
 
-class NodeUnaryExpression(Node):
-    def __init__(self, expr: Node, type: Type):
-        super().__init__(type)
-        self.expr = expr
-
-class NodeNotExpression(NodeUnaryExpression):
-    def render(self) -> str:
-        return f"not {self.expr.render()}"
-
-class NodeNegExpression(NodeUnaryExpression):
-    def render(self) -> str:
-        return f"-{self.expr.render()}"
-
-
 # others
 class NodeBreak(Node):
     def render(self) -> str:
@@ -1665,7 +1651,6 @@ class CompCtx:
                             params = []
                             for i in range(0, len(unresolved_args)):
                                 formal_type = callee_node.type.function_arg_types()[i]
-                                # TODO: Do not eat errors. This makes overload resolution give the wrong error
                                 try:
                                     resolved_arg = self.expression(unresolved_args[i], formal_type)
                                     if isinstance(resolved_arg, NodeOptions):
@@ -1729,27 +1714,6 @@ class CompCtx:
             raise ValueError(f"Indexing without an ordinal type is not allowed {idx_op.render()}: {idx_op.type.render()}")
         return NodeIdxOp(lhs_node, idx_op, lhs_node.type.element_type(self.graph))
 
-    def unary_expression(self, tree: Tree, expected_type: Type) -> Node:
-        assert tree.data == "unary_expression"
-        op = tree.children[0].type
-        expr = self.expression(tree.children[1], expected_type)
-
-        if expected_type != None and not expr.type.types_compatible(expected_type):
-            raise SerqTypeInferError(f"Value of type {expr.type.render()} is not compatible with expected type {expected_type.render()}")
-
-        match op:
-            case "not":
-                if not expr.type.is_logical_type():
-                    raise SerqTypeInferError(f"Unable to apply `not` to value of type {expr.type.render()}")
-                return NodeNotExpression(expr, expr.type)
-            case "minus":
-                if not expr.type.is_arith_type():
-                    raise SerqInternalError(f"Unable to negate value of type {expr.type.render()}")
-                return NodeNegExpression(expr, expr.type)
-            case _:
-                raise NotImplementedError(op)
-
-
     def expression(self, tree: Tree, expected_type: Type) -> Node:
         assert tree.data == "expression", tree.data
         assert len(tree.children) == 1
@@ -1761,8 +1725,6 @@ class CompCtx:
                     result.append(self.fn_call_expr(child, expected_type))
                 case "idx_op":
                     result.append(self.idx_op(child))
-                case "unary_expression":
-                    result.append(self.unary_expression(child, expected_type))
                 case "binary_expression":
                     result.append(self.binary_expression(child, expected_type))
                 case "block_expression":
