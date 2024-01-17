@@ -225,17 +225,8 @@ class SerqParser:
             res = Tree("idx_op", children=[res, idx_expr])
         return self._wrap_expr(res)
 
-    def _descend_unary_expr(self) -> Tree:
-        expr_or_op = self.peek(0)
-        if expr_or_op.kind in [SqTokenKind.MINUS, SqTokenKind.NOT]:
-            op = self._eat_operator()
-            rhs = self._descend_cmp_expr() # NOTE: We do not go back to the start of the tree because it will cause issues with associativity
-            return self._wrap_expr(Tree("unary_expression", children=[op, rhs]))
-        else:
-            return self._descend_atom_expr()
-
     def _descend_dot_expr(self) -> Tree:
-        expr = self._descend_unary_expr()
+        expr = self._descend_atom_expr()
         while self.peek(0).kind == SqTokenKind.DOT:
             op = self._eat_operator()
             rhs = self._eat_identifier()
@@ -246,12 +237,21 @@ class SerqParser:
                 args = self._eat_function_args()
                 expr = self._wrap_expr(Tree("fn_call_expr", children=[expr, args]))
         return expr
+    
+    def _descend_neg_expr(self) -> Tree:
+        expr_or_op = self.peek(0)
+        if expr_or_op.kind == SqTokenKind.MINUS:
+            op = self._eat_operator()
+            expr = self._descend_dot_expr()
+            return self._wrap_expr(Tree("unary_expression", children=[op, expr]))
+        else:
+            return self._descend_dot_expr()
 
     def _descend_mul_expr(self) -> Tree:
-        expr = self._descend_dot_expr()
+        expr = self._descend_neg_expr()
         while self.peek(0).kind in [SqTokenKind.STAR, SqTokenKind.SLASH, SqTokenKind.MODULUS]:
             op = self._eat_operator()
-            rhs = self._descend_dot_expr()
+            rhs = self._descend_neg_expr()
             expr = self._wrap_expr(Tree("binary_expression", children=[expr, op, rhs]))
         return expr
 
@@ -271,12 +271,21 @@ class SerqParser:
             rhs = self._descend_plus_expr()
             expr = self._wrap_expr(Tree("binary_expression", children=[expr, op, rhs]))
         return expr
+    
+    def _descend_not_expr(self) -> Tree:
+        expr_or_op = self.peek(0)
+        if expr_or_op.kind == SqTokenKind.NOT:
+            op = self._eat_operator()
+            expr = self._descend_cmp_expr()
+            return self._wrap_expr(Tree("unary_expression", children=[op, expr]))
+        else:
+            return self._descend_cmp_expr()
 
     def _descend_and_expr(self) -> Tree:
-        expr = self._descend_cmp_expr()
+        expr = self._descend_not_expr()
         while self.peek(0).kind in [SqTokenKind.AND, SqTokenKind.OR]:
             op = self._eat_operator()
-            rhs = self._descend_cmp_expr()
+            rhs = self._descend_not_expr()
             expr = self._wrap_expr(Tree("binary_expression", children=[expr, op, rhs]))
         return expr
 
