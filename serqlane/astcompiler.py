@@ -575,7 +575,7 @@ class Type:
         assert self.is_indexable()
         match self.kind:
             case TypeKind.string | TypeKind.literal_string:
-                return graph.request_module(MAGIC_MODULE_NAME).global_scope.lookup_type("char", shadowing_rule=ShadowingRule.shallow)
+                return graph.request_module(MAGIC_MODULE_NAME).global_scope.lookup_type("char", shadowing_rule=ShadowingRule.allowed)
             case _:
                 raise NotImplementedError()
 
@@ -688,13 +688,13 @@ class Type:
         assert self.is_literal_type()
         match self.kind:
             case TypeKind.literal_int:
-                return graph.request_module(MAGIC_MODULE_NAME).global_scope.lookup_type("int64", shadowing_rule=ShadowingRule.shallow)
+                return graph.request_module(MAGIC_MODULE_NAME).global_scope.lookup_type("int64", shadowing_rule=ShadowingRule.allowed)
             case TypeKind.literal_float:
-                return graph.request_module(MAGIC_MODULE_NAME).global_scope.lookup_type("float64", shadowing_rule=ShadowingRule.shallow)
+                return graph.request_module(MAGIC_MODULE_NAME).global_scope.lookup_type("float64", shadowing_rule=ShadowingRule.allowed)
             case TypeKind.literal_bool:
-                return graph.request_module(MAGIC_MODULE_NAME).global_scope.lookup_type("bool", shadowing_rule=ShadowingRule.shallow)
+                return graph.request_module(MAGIC_MODULE_NAME).global_scope.lookup_type("bool", shadowing_rule=ShadowingRule.allowed)
             case TypeKind.literal_string:
-                return graph.request_module(MAGIC_MODULE_NAME).global_scope.lookup_type("string", shadowing_rule=ShadowingRule.shallow)
+                return graph.request_module(MAGIC_MODULE_NAME).global_scope.lookup_type("string", shadowing_rule=ShadowingRule.allowed)
             case _:
                 raise SerqInternalError(f"Forgot a literal type: {self.kind}")
 
@@ -820,7 +820,7 @@ class Scope:
                     yield sym
 
         # parent lookup
-        if not shadowing_rule not in [ShadowingRule.allowed, ShadowingRule.shallow] and self.parent != None:
+        if shadowing_rule != ShadowingRule.shallow and self.parent != None:
             yield from self.parent._iter_syms_impl(shadowing_rule=shadowing_rule, include_magics=False, include_imports=include_imports)
 
     def iter_syms(self, shadowing_rule: ShadowingRule, name: Optional[str] = None, *, include_magics=True, only_public=False, include_imports=False) -> Iterator[Symbol]:
@@ -1057,7 +1057,7 @@ class CompCtx:
         assert tree.data == "while_stmt", tree.data
         assert expected_type.kind == TypeKind.unit
         # This has to use the outer scope, so a new scope is only opened once this has been checked in full
-        while_cond = self.expression(tree.children[0], self.current_scope.lookup_type("bool", shadowing_rule=ShadowingRule.shallow))
+        while_cond = self.expression(tree.children[0], self.current_scope.lookup_type("bool", shadowing_rule=ShadowingRule.allowed))
         assert while_cond.type.kind == TypeKind.bool
 
         # block_stmt opens a scope
@@ -1071,7 +1071,7 @@ class CompCtx:
         assert tree.data == "if_stmt", tree.data
         assert expected_type.kind in [TypeKind.unit, TypeKind.infer] # TODO: if expressions are not unit, need to guarantee valid else branch
         # Same scoping story as in while_stmt
-        if_cond = self.expression(tree.children[0], self.current_scope.lookup_type("bool", shadowing_rule=ShadowingRule.shallow))
+        if_cond = self.expression(tree.children[0], self.current_scope.lookup_type("bool", shadowing_rule=ShadowingRule.allowed))
         assert if_cond.type.kind == TypeKind.bool
         if_body = self.handle_block(tree.children[1], self.get_unit_type())
 
@@ -1262,33 +1262,33 @@ class CompCtx:
 
             case "equals":
                 if both_lit:
-                    return NodeBoolLit(lhs.value == rhs.value, type=self.current_scope.lookup_type("bool", shadowing_rule=ShadowingRule.shallow))
-                return NodeEqualsExpression(lhs, rhs, type=self.current_scope.lookup_type("bool", shadowing_rule=ShadowingRule.shallow))
+                    return NodeBoolLit(lhs.value == rhs.value, type=self.current_scope.lookup_type("bool", shadowing_rule=ShadowingRule.allowed))
+                return NodeEqualsExpression(lhs, rhs, type=self.current_scope.lookup_type("bool", shadowing_rule=ShadowingRule.allowed))
             case "not_equals":
                 if both_lit:
-                    return NodeBoolLit(lhs.value != rhs.value, type=self.current_scope.lookup_type("bool", shadowing_rule=ShadowingRule.shallow))
-                return NodeNotEqualsExpression(lhs, rhs, type=self.current_scope.lookup_type("bool", shadowing_rule=ShadowingRule.shallow))
+                    return NodeBoolLit(lhs.value != rhs.value, type=self.current_scope.lookup_type("bool", shadowing_rule=ShadowingRule.allowed))
+                return NodeNotEqualsExpression(lhs, rhs, type=self.current_scope.lookup_type("bool", shadowing_rule=ShadowingRule.allowed))
             case "less":
                 # TODO: Ordinal types.
                 assert expr_type.is_arith_type()
                 if both_lit:
-                    return NodeBoolLit(lhs.value < rhs.value, type=self.current_scope.lookup_type("bool", shadowing_rule=ShadowingRule.shallow))
-                return NodeLessExpression(lhs, rhs, type=self.current_scope.lookup_type("bool", shadowing_rule=ShadowingRule.shallow))
+                    return NodeBoolLit(lhs.value < rhs.value, type=self.current_scope.lookup_type("bool", shadowing_rule=ShadowingRule.allowed))
+                return NodeLessExpression(lhs, rhs, type=self.current_scope.lookup_type("bool", shadowing_rule=ShadowingRule.allowed))
             case "lesseq":
                 assert expr_type.is_arith_type()
                 if both_lit:
-                    return NodeBoolLit(lhs.value <= rhs.value, type=self.current_scope.lookup_type("bool", shadowing_rule=ShadowingRule.shallow))
-                return NodeLessEqualsExpression(lhs, rhs, type=self.current_scope.lookup_type("bool", shadowing_rule=ShadowingRule.shallow))
+                    return NodeBoolLit(lhs.value <= rhs.value, type=self.current_scope.lookup_type("bool", shadowing_rule=ShadowingRule.allowed))
+                return NodeLessEqualsExpression(lhs, rhs, type=self.current_scope.lookup_type("bool", shadowing_rule=ShadowingRule.allowed))
             case "greater":
                 assert expr_type.is_arith_type()
                 if both_lit:
-                    return NodeBoolLit(lhs.value > rhs.value, type=self.current_scope.lookup_type("bool", shadowing_rule=ShadowingRule.shallow))
-                return NodeGreaterExpression(lhs, rhs, type=self.current_scope.lookup_type("bool", shadowing_rule=ShadowingRule.shallow))
+                    return NodeBoolLit(lhs.value > rhs.value, type=self.current_scope.lookup_type("bool", shadowing_rule=ShadowingRule.allowed))
+                return NodeGreaterExpression(lhs, rhs, type=self.current_scope.lookup_type("bool", shadowing_rule=ShadowingRule.allowed))
             case "greatereq":
                 assert expr_type.is_arith_type()
                 if both_lit:
-                    return NodeBoolLit(lhs.value >= rhs.value, type=self.current_scope.lookup_type("bool", shadowing_rule=ShadowingRule.shallow))
-                return NodeGreaterEqualsExpression(lhs, rhs, type=self.current_scope.lookup_type("bool", shadowing_rule=ShadowingRule.shallow))
+                    return NodeBoolLit(lhs.value >= rhs.value, type=self.current_scope.lookup_type("bool", shadowing_rule=ShadowingRule.allowed))
+                return NodeGreaterEqualsExpression(lhs, rhs, type=self.current_scope.lookup_type("bool", shadowing_rule=ShadowingRule.allowed))
 
             case "dot":
                 lhs = self.expression(tree.children[0], None)
@@ -1312,7 +1312,7 @@ class CompCtx:
                         assert isinstance(lhs.type.data, Module)
                         warnings.warn("Module disambiguation must use the same logic as identifier. Do not merge.")
                         candidates: list[NodeSymbol] = []
-                        for sym in lhs.type.data.global_scope.iter_syms(shadowing_rule=ShadowingRule.shallow, name=rhs, only_public=True, include_magics=False):
+                        for sym in lhs.type.data.global_scope.iter_syms(shadowing_rule=ShadowingRule.allowed, name=rhs, only_public=True, include_magics=False):
                             if self.current_scope.is_imported(lhs.type.data, sym):
                                 candidates.append(NodeSymbol(sym, sym.type))
                         if len(candidates) == 1:
@@ -1320,7 +1320,7 @@ class CompCtx:
                         else:
                             raise ValueError(f"Bad module access: {rhs}")
                     case TypeKind.namespace:
-                        syms: list[Symbol] = list(lhs.type.data.iter_syms(shadowing_rule=ShadowingRule.shallow, name=rhs, include_magics=False))
+                        syms: list[Symbol] = list(lhs.type.data.iter_syms(shadowing_rule=ShadowingRule.allowed, name=rhs, include_magics=False))
                         if len(syms) != 1:
                             raise ValueError(f"Unable to find {rhs} in {lhs.render()}")
                         return NodeDotAccess(lhs, NodeSymbol(syms[0], syms[0].type))
@@ -1760,7 +1760,7 @@ class CompCtx:
 
     def start(self, tree: Tree) -> NodeStmtList:
         assert tree.data == "start", tree.data
-        result = NodeStmtList(self.current_scope.lookup_type("unit", shadowing_rule=ShadowingRule.shallow))
+        result = NodeStmtList(self.current_scope.lookup_type("unit", shadowing_rule=ShadowingRule.allowed))
         if self.module.name != MAGIC_MODULE_NAME:
             result.add(self.make_from_import_node(MAGIC_MODULE_NAME, wildcard=True))
         for child in tree.children:
