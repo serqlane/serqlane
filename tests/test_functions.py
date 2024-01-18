@@ -1,6 +1,6 @@
 import pytest
 
-from serqlane.astcompiler import SerqInternalError
+from serqlane.astcompiler import SerqTypeInferError
 
 
 # code, variable, expected
@@ -85,7 +85,7 @@ abc()
 
 
 def test_function_call_symbol(executor):
-    with pytest.raises(ValueError):
+    with pytest.raises(SerqTypeInferError):
         executor("""
 true()
 """)

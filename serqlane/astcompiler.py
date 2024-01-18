@@ -613,7 +613,18 @@ class Type:
                 return lhs.kind == rhs.kind
 
             case TypeKind.function:
-                raise NotImplementedError() # TODO
+                if rhs.kind != TypeKind.function:
+                    return False
+                lhs_args = lhs.function_arg_types()
+                rhs_args = rhs.function_arg_types()
+                if len(lhs_args) != len(rhs_args):
+                    # TODO: Fix this for optional args
+                    return False
+                for i in range(0, len(lhs_args)):
+                    if not lhs_args[i].types_compatible(rhs_args[i]):
+                        return False
+                # TODO: Generics?
+                return lhs.return_type().types_compatible(rhs.return_type())
 
             # magic types
 
@@ -708,6 +719,8 @@ class Type:
             return f"fn({args}): {self.data[1].render()}"
         elif self.kind == TypeKind.struct:
             return self.sym.definition_node.render()
+        elif self.kind == TypeKind.infer:
+            return "<infer>"
         else:
             raise SerqInternalError(f"Render isn't implemented for type kind {self.kind}")
 
@@ -1338,13 +1351,25 @@ class CompCtx:
         warnings.warn("Identifier currently does not take the expected type into account and is unfinished. Do not merge.")
 
         candidates: list[NodeSymbol] = []
+        has_fn = False
         for sym in self.current_scope.iter_syms(shadowing_rule=ShadowingRule.allowed, name=val, include_imports=True):
             if sym.type.is_alias():
                 assert isinstance(sym.definition_node, NodeAliasDefinition)
                 sym = sym.definition_node.skip_safe_aliases()
-            candidates.append(NodeSymbol(sym, sym.type))
+            if expected_type == None or expected_type.types_compatible(sym.type) \
+                or (expected_type.kind == TypeKind.function and sym.type.kind == TypeKind.struct): # TODO: WORKAROUND! Replace
+                candidates.append(NodeSymbol(sym, sym.type))
+                if sym.type.kind == TypeKind.function:
+                    has_fn = True
+            else:
+                print(f"INCOMPATIBLE: {sym.name}")
+                print(expected_type.render())
+                print(sym.type.render())
 
         if len(candidates) > 1:
+            if has_fn:
+                raise ValueError(f"Encountered an ambiguous identifier: {val}")
+
             block_shadowing = False
             for i in range(len(candidates) - 1, -1, -1):
                 rule = candidates[i].symbol.shadowing_rule
@@ -1680,8 +1705,22 @@ class CompCtx:
 
     def fn_call_expr(self, tree: Tree, expected_type: Type) -> NodeFnCall:
         assert tree.data == "fn_call_expr", tree.data
-        callee_node = self.expression(tree.children[0], None)
-        call = self.resolve_call(callee_node, tree.children[1].children if tree.children[1].children[0] != None else [])
+
+        unresolved_args: list[Tree] = tree.children[1].children if tree.children[1].children[0] != None else []
+        preliminary_arg_types: list[Type] = []
+        for unresolved_arg in unresolved_args:
+            typ = self.expression(unresolved_arg, None).type
+            # Lie to make overload resolution more effective
+            #if typ.is_int_type():
+            #    typ.kind = TypeKind.literal_int
+            #elif typ.is_float_type():
+            #    typ.kind = TypeKind.literal_float
+            print(typ.render())
+            preliminary_arg_types.append(typ)
+        expected_callee_type = Type(TypeKind.function, None, (preliminary_arg_types, self.get_infer_type()))
+
+        callee_node = self.expression(tree.children[0], expected_type=expected_callee_type)
+        call = self.resolve_call(callee_node, unresolved_args)
         if call == None:
             raise ValueError(f"No matching overload found for {tree.children[0].children[0].children[0].value}")
         return call
