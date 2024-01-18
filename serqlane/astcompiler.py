@@ -6,6 +6,7 @@ from typing import Any, Optional, Iterator
 import pathlib
 import hashlib
 import textwrap
+import warnings
 
 from serqlane.parser import Token, Tree, SerqParser
 from serqlane.common import SerqInternalError
@@ -68,24 +69,6 @@ class NodeModuleSymbol(Node):
 
     def render(self) -> str:
         return f"{self.symbol.render()}"
-
-class NodeOptions(Node):
-    def __init__(self, type: Type) -> None:
-        super().__init__(type)
-        self.options: list[Node] = []
-
-    def extract_unambiguous(self) -> Node:
-        if len(self.options) != 1:
-            raise ValueError(f"Failed to extract an unambiguous node: {[x.render() for x in self.options]}")
-        return self.use_first()
-
-    def use_first(self) -> Node:
-        assert len(self.options) > 0
-        return self.options[0]
-
-    def render(self) -> str:
-        # Just use the first sym, if this appears in the final ast that's a bug
-        return f"{self.options[0].render()}"
 
 class NodeStmtList(Node):
     def __init__(self, type: Type) -> None:
@@ -218,10 +201,11 @@ class NodeGreaterEqualsExpression(NodeBinaryExpr):
         return f"({self.lhs.render()} >= {self.rhs.render()})"
 
 class NodeDotAccess(Node):
-    def __init__(self, lhs: Node, rhs: Symbol) -> None:
+    def __init__(self, lhs: Node, rhs: NodeSymbol) -> None:
         super().__init__(rhs.type)
         self.lhs = lhs
         self.rhs = rhs
+        assert isinstance(self.rhs, NodeSymbol)
 
     def render(self) -> str:
         return f"{self.lhs.render()}.{self.rhs.render()}"
@@ -382,7 +366,7 @@ class NodeImport(Node):
         return f"import {self.orig_path}"
 
 class NodeFromImport(Node):
-    def __init__(self, module_sym: Symbol, to_import: list[NodeOptions], orig_path: str, type: Type, *, wildcard=False) -> None:
+    def __init__(self, module_sym: Symbol, to_import: list[NodeSymbol], orig_path: str, type: Type, *, wildcard=False) -> None:
         super().__init__(type)
         self.module_sym = module_sym
         self.to_import = to_import
@@ -792,12 +776,11 @@ class Scope:
             syms = list(node.module_sym.type.data.global_scope.iter_syms(only_public=True, include_magics=False, include_imports=False))
             self._imported_syms[node.module_sym.type.data] = syms
         else:
-            syms = []
-            for options in node.to_import:
-                for option in options.options:
-                    if not isinstance(option, NodeSymbol):
-                        raise ValueError("Tried to import a non-symbol")
-                    syms.append(option.symbol)
+            syms: list[Symbol] = []
+            for isym in node.to_import:
+                if not isinstance(isym, NodeSymbol):
+                    raise ValueError("Tried to import a non-symbol")
+                syms.append(isym.symbol)
             self._imported_syms[node.module_sym.type.data] = syms
         self._inject_import_namespaces(node.orig_path, node.module_sym)
 
@@ -1018,12 +1001,12 @@ class CompCtx:
         to_import = []
         if not wildcard:
             for ident in names:
-                option_node = NodeOptions(self.get_unit_type())
+                found_syms: list[NodeSymbol] = []
                 for sym in module.global_scope.iter_syms(name=ident, include_magics=False, only_public=True):
-                    option_node.options.append(NodeSymbol(sym, sym.type))
-                if len(option_node.options) == 0:
+                    found_syms.append(NodeSymbol(sym, sym.type))
+                if len(found_syms) == 0:
                     raise ValueError(f"Could not find public symbol `{ident}` in module `{module.name}`")
-                to_import.append(option_node)
+                to_import.extend(found_syms)
         res = NodeFromImport(
             module_sym=module.sym,
             to_import=to_import,
@@ -1081,8 +1064,6 @@ class CompCtx:
         assert expected_type.kind in [TypeKind.unit, TypeKind.infer] # TODO: if expressions are not unit, need to guarantee valid else branch
         # Same scoping story as in while_stmt
         if_cond = self.expression(tree.children[0], self.current_scope.lookup_type("bool", shallow=True))
-        if isinstance(if_cond, NodeOptions):
-            if_cond = if_cond.extract_unambiguous()
         assert if_cond.type.kind == TypeKind.bool
         if_body = self.handle_block(tree.children[1], self.get_unit_type())
 
@@ -1112,8 +1093,6 @@ class CompCtx:
 
         if expected_type != None:
             last = self.statement(last_child, expected_type)
-            if isinstance(last, NodeOptions):
-                last = last.use_first()
             result.add(last)
             # TODO: Get rid of check here once shadow syms are in
             assert expected_type.types_compatible(result.children[-1].type), f"Expected type {expected_type.sym.render()} for block but got {result.children[-1].type.sym.render()}"
@@ -1178,15 +1157,11 @@ class CompCtx:
     def binary_expression(self, tree: Tree, expected_type: Type) -> NodeBinaryExpr:
         assert tree.data == "binary_expression", tree.data
         lhs = self.expression(tree.children[0], None)
-        if isinstance(lhs, NodeOptions):
-            lhs = lhs.use_first()
         # TODO: Can the symbol be captured somehow?
         op = tree.children[1].data
         # a dot expression does not work by the same type rules
         if op != "dot":
             rhs = self.expression(tree.children[2], None)
-            if isinstance(rhs, NodeOptions):
-                rhs = rhs.use_first()
 
             lhs_lit = isinstance(lhs, NodeLiteral)
             rhs_lit = isinstance(rhs, NodeLiteral)
@@ -1207,34 +1182,22 @@ class CompCtx:
             # if there is a known type, spread it around
             if lhs.type.is_literal_type() and not rhs.type.is_literal_type():
                 lhs = self.expression(tree.children[0], rhs.type)
-                if isinstance(lhs, NodeOptions):
-                    lhs = lhs.use_first()
             elif rhs.type.is_literal_type() and not lhs.type.is_literal_type():
                 rhs = self.expression(tree.children[2], lhs.type)
-                if isinstance(rhs, NodeOptions):
-                    rhs = rhs.use_first()
 
             # both literal
             else:
                 # if possible we ask for help from expected_type
                 if expected_type != None and expr_type.types_compatible(expected_type):
                     lhs = self.expression(tree.children[0], expected_type)
-                    if isinstance(lhs, NodeOptions):
-                        lhs = lhs.use_first()
                     rhs = self.expression(tree.children[2], expected_type)
-                    if isinstance(rhs, NodeOptions):
-                        rhs = rhs.use_first()
                     assert lhs.type.types_compatible(rhs.type)
                     expr_type = lhs.type
 
                 # no expectation, let them infer their own types
                 elif expected_type == None:
                     lhs = self.expression(tree.children[0], self.get_infer_type())
-                    if isinstance(lhs, NodeOptions):
-                        lhs = lhs.use_first()
                     rhs = self.expression(tree.children[2], self.get_infer_type())
-                    if isinstance(rhs, NodeOptions):
-                        rhs = rhs.use_first()
                     assert lhs.type.types_compatible(rhs.type)
                     expr_type = lhs.type
 
@@ -1321,8 +1284,6 @@ class CompCtx:
 
             case "dot":
                 lhs = self.expression(tree.children[0], None)
-                if isinstance(lhs, NodeOptions):
-                    lhs = lhs.use_first() # TODO: This WILL cause bad symbol lookup
                 rhs = tree.children[2].children[0].value
 
                 match lhs.type.kind:
@@ -1338,18 +1299,20 @@ class CompCtx:
                                 break
                         assert matching_field_sym != None, f"Could not find {rhs} for {lhs.type.sym.render()}"
 
-                        return NodeDotAccess(lhs, matching_field_sym)
+                        return NodeDotAccess(lhs, NodeSymbol(matching_field_sym, matching_field_sym.type))
                     case TypeKind.module:
                         assert isinstance(lhs.type.data, Module)
-                        options = NodeOptions(self.get_unit_type())
+                        warnings.warn("Module disambiguation must use the same logic as identifier. Do not merge.")
+                        candidates: list[NodeSymbol] = []
                         for sym in lhs.type.data.global_scope.iter_syms(name=rhs, shallow=True, only_public=True, include_magics=False):
                             if self.current_scope.is_imported(lhs.type.data, sym):
-                                options.options.append(NodeSymbol(sym, sym.type))
-                        if len(options.options) < 1:
-                            raise ValueError(f"Could not find {rhs} in module {lhs.render()}")
-                        return NodeDotAccess(lhs, options)
+                                candidates.append(NodeSymbol(sym, sym.type))
+                        if len(candidates) == 1:
+                            return NodeDotAccess(lhs, candidates[0])
+                        else:
+                            raise ValueError(f"Bad module access: {rhs}")
                     case TypeKind.namespace:
-                        syms = list(lhs.type.data.iter_syms(name=rhs, include_magics=False))
+                        syms: list[Symbol] = list(lhs.type.data.iter_syms(name=rhs, include_magics=False))
                         if len(syms) != 1:
                             raise ValueError(f"Unable to find {rhs} in {lhs.render()}")
                         return NodeDotAccess(lhs, NodeSymbol(syms[0], syms[0].type))
@@ -1359,25 +1322,31 @@ class CompCtx:
                 raise SerqInternalError(f"Unimplemented binary op: {op}")
 
 
-    def identifier(self, tree: Tree, expected_type: Type) -> NodeOptions:
+    def identifier(self, tree: Tree, expected_type: Type) -> NodeSymbol:
         assert tree.data == "identifier", tree.data
         val = tree.children[0].value
 
-        res = NodeOptions(self.get_unit_type()) # TODO: Could use an error type to ensure consistent analysis later
+        # TODO: Make all calls set the expected type and use it for disambiguation
+        warnings.warn("Identifier currently does not take the expected type into account and is unfinished. Do not merge.")
+
+        candidates: list[NodeSymbol] = []
         for sym in self.current_scope.iter_syms(val, include_imports=True):
             if sym.type.is_alias():
+                assert isinstance(sym.definition_node, NodeAliasDefinition)
                 sym = sym.definition_node.skip_safe_aliases()
-            res.options.append(NodeSymbol(sym, sym.type))
+            candidates.append(NodeSymbol(sym, sym.type))
 
-        if len(res.options) > 0:
-            return res
-        # TODO: Error reporting
-        raise ValueError(f"Bad identifier: {val}")
+        if len(candidates) == 1:
+            return candidates[0]
+        elif len(candidates) > 1:
+            # for overload resolution with ambiguous types like literal ints as params
+            raise ValueError(f"Encountered an ambiguous identifier: {val}")
+        else:
+            raise ValueError(f"Unable to find identifier {val}")
 
     def user_type(self, tree: Tree) -> NodeSymbol:
         assert tree.data in ["user_type", "return_user_type"], tree.data
-        options = self.identifier(tree.children[0], None)
-        return options.extract_unambiguous()
+        return self.identifier(tree.children[0], None)
 
     def assignment(self, tree: Tree, expected_type: Type) -> NodeAssignment:
         assert tree.data == "assignment", tree.data
@@ -1385,11 +1354,7 @@ class CompCtx:
         assert expected_type.kind == TypeKind.unit
 
         lhs = self.expression(tree.children[0], None)
-        if isinstance(lhs, NodeOptions):
-            lhs = lhs.use_first()
         rhs = self.expression(tree.children[1], lhs.type)
-        if isinstance(rhs, NodeOptions):
-            rhs = rhs.use_first()
         assert lhs.type.types_compatible(rhs.type)
 
         def report_immutable(sym: Symbol):
@@ -1436,8 +1401,6 @@ class CompCtx:
 
         val_node_expected_type = type_sym.type if type_sym != None else self.get_infer_type()
         val_node = self.expression(tree.children[f], val_node_expected_type)
-        if isinstance(val_node, NodeOptions):
-            val_node = val_node.extract_unambiguous()
         if val_node.type.kind == TypeKind.unit:
             raise ValueError(f"Type `{val_node.type.kind.name}` is not valid for `let`")
 
@@ -1479,8 +1442,6 @@ class CompCtx:
         expr = None
         if tree.children[0] != None:
             expr = self.expression(tree.children[0], self.current_deferred_ret_type)
-            if isinstance(expr, NodeOptions):
-                expr = expr.use_first()
         else:
             expr = NodeEmpty(self.current_deferred_ret_type)
         assert self.current_deferred_ret_type.types_compatible(expr.type), f"Incompatible return({expr.type.sym.render()}) for function type({self.current_deferred_ret_type.render()})"
@@ -1491,15 +1452,14 @@ class CompCtx:
         assert expected_type.kind == TypeKind.unit
 
         src = self.identifier(tree.children[1], None)
-        unambig_node = src.extract_unambiguous()
-        if not isinstance(unambig_node, NodeSymbol):
+        if not isinstance(src, NodeSymbol):
             raise ValueError("Taking an alias of something that isn't a symbol isn't allowed")
 
         alias_name = tree.children[0].children[0].value
         alias_sym = self.current_scope.put_alias(alias_name)
-        alias_sym.type.base = unambig_node.type
+        alias_sym.type.base = src.type
 
-        res_node = NodeAliasDefinition(alias_sym, unambig_node.symbol, self.get_unit_type())
+        res_node = NodeAliasDefinition(alias_sym, src.symbol, self.get_unit_type())
         alias_sym.definition_node = res_node
         return res_node
 
@@ -1651,11 +1611,6 @@ class CompCtx:
     def resolve_call(self, callee_node: Node, unresolved_args: list[Tree]) -> Optional[NodeFnCall]:
         def _resolve_call_impl(callee_node: Node, unresolved_args: list[Tree]) -> list[NodeFnCall]:
             match callee_node:
-                case NodeOptions():
-                    candidates = []
-                    for option in callee_node.options:
-                        candidates.extend(_resolve_call_impl(option, unresolved_args))
-                    return candidates
                 case NodeSymbol():
                     match callee_node.type.kind:
                         case TypeKind.function:
@@ -1668,8 +1623,6 @@ class CompCtx:
                                 # TODO: Do not eat errors. This makes overload resolution give the wrong error
                                 try:
                                     resolved_arg = self.expression(unresolved_args[i], formal_type)
-                                    if isinstance(resolved_arg, NodeOptions):
-                                        resolved_arg = resolved_arg.use_first()
                                     if not resolved_arg.type.types_compatible(formal_type):
                                         return []
                                     params.append(resolved_arg)
@@ -1718,13 +1671,9 @@ class CompCtx:
     def idx_op(self, tree: Tree) -> NodeIdxOp:
         assert tree.data == "idx_op", tree.data
         lhs_node = self.expression(tree.children[0], None)
-        if isinstance(lhs_node, NodeOptions):
-            lhs_node = lhs_node.extract_unambiguous()
         if not lhs_node.type.is_indexable():
             raise ValueError(f"Tried indexing into a non-indexable expression: {lhs_node.render()}: {lhs_node.type.render()}")
         idx_op = self.expression(tree.children[1], None) # TODO: Any ordinal type
-        if isinstance(idx_op, NodeOptions):
-            idx_op = idx_op.extract_unambiguous()
         if not idx_op.type.is_ordinal_type():
             raise ValueError(f"Indexing without an ordinal type is not allowed {idx_op.render()}: {idx_op.type.render()}")
         return NodeIdxOp(lhs_node, idx_op, lhs_node.type.element_type(self.graph))
