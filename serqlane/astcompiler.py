@@ -124,7 +124,7 @@ class NodeLet(Node):
         self.expr = expr
 
     def render(self) -> str:
-        is_mut = self.sym_node.symbol.mutable
+        is_mut = self.sym_node.symbol.mutable or self.sym_node.symbol.hidden_mutable
         return f"let {"mut " if is_mut else ""}{self.sym_node.render()}{": " + self.sym_node.type.sym.render()} = {self.expr.render()}"
 
 class NodeAssignment(Node):
@@ -403,6 +403,7 @@ class Symbol:
         self.type = type
         self.public = False
         self.mutable = mutable
+        self.hidden_mutable = False
         self.definition_node: Node = None
         self.magic = magic
         self._source_module = source_module
@@ -1129,6 +1130,7 @@ class CompCtx:
         range_expr = self.range_expression(tree.children[1])
         iter_var = self.current_scope.put_iter_let(tree.children[0].children[0].value)
         iter_var.type = range_expr.start.type
+        iter_var.hidden_mutable = True
         iter_var = NodeSymbol(iter_var, iter_var.type)
         cond_node = NodeLessExpression(
             iter_var,
