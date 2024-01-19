@@ -1354,7 +1354,7 @@ class CompCtx:
                 lhs = self.expression(tree.children[0], None)
                 rhs = tree.children[2].children[0].value
 
-                if expected_type != None and expected_type.kind == TypeKind.function:
+                if expected_type != None and expected_type.kind == TypeKind.function and lhs.type.kind not in [TypeKind.module, TypeKind.namespace, TypeKind.struct]:
                     expected_type.data = ([lhs.type] + expected_type.data[0], expected_type.data[1])
 
                 match lhs.type.kind:
@@ -1766,7 +1766,7 @@ class CompCtx:
         expected_callee_type = Type(TypeKind.function, None, (preliminary_arg_types, self.get_infer_type()))
 
         callee_node = self.expression(tree.children[0], expected_type=expected_callee_type)
-        if len(callee_node.type.function_arg_types()) > len(unresolved_args):
+        if callee_node.type.kind == TypeKind.function and len(callee_node.type.function_arg_types()) > len(unresolved_args):
             if not isinstance(callee_node, NodeDotAccess):
                 raise SerqInternalError(callee_node)
             unresolved_args = [tree.children[0].children[0].children[0]] + unresolved_args
