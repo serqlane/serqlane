@@ -11,7 +11,7 @@ python = "^3.12"
 
 [tool.poetry.group.test.dependencies]
 pytest = "^7.4.3"
-pytest-cov = "^4.1.0"
+
 
 [tool.poetry.group.fuzz]
 optional = true
@@ -24,6 +24,12 @@ optional = true
 
 [tool.poetry.group.benchmarks.dependencies]
 pytest-benchmark = "^4.0.0"
+
+[tool.poetry.group.coverage]
+optional = true
+
+[tool.poetry.group.coverage.dependencies]
+pytest-cov = "^4.1.0"
 
 [tool.poetry.scripts]
 serqlane = "serqlane.__main__:main"
