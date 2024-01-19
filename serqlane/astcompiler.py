@@ -1347,9 +1347,6 @@ class CompCtx:
         assert tree.data == "identifier", tree.data
         val = tree.children[0].value
 
-        # TODO: Make all calls set the expected type and use it for disambiguation
-        warnings.warn("Identifier currently does not take the expected type into account and is unfinished. Do not merge.")
-
         candidates: list[NodeSymbol] = []
         has_fn = False
         for sym in self.current_scope.iter_syms(shadowing_rule=ShadowingRule.allowed, name=val, include_imports=True):
@@ -1361,10 +1358,6 @@ class CompCtx:
                 candidates.append(NodeSymbol(sym, sym.type))
                 if sym.type.kind == TypeKind.function:
                     has_fn = True
-            else:
-                print(f"INCOMPATIBLE: {sym.name}")
-                print(expected_type.render())
-                print(sym.type.render())
 
         if len(candidates) > 1:
             if has_fn:
@@ -1710,12 +1703,6 @@ class CompCtx:
         preliminary_arg_types: list[Type] = []
         for unresolved_arg in unresolved_args:
             typ = self.expression(unresolved_arg, None).type
-            # Lie to make overload resolution more effective
-            #if typ.is_int_type():
-            #    typ.kind = TypeKind.literal_int
-            #elif typ.is_float_type():
-            #    typ.kind = TypeKind.literal_float
-            print(typ.render())
             preliminary_arg_types.append(typ)
         expected_callee_type = Type(TypeKind.function, None, (preliminary_arg_types, self.get_infer_type()))
 
