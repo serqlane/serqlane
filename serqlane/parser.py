@@ -237,7 +237,7 @@ class SerqParser:
                 args = self._eat_function_args()
                 expr = self._wrap_expr(Tree("fn_call_expr", children=[expr, args]))
         return expr
-    
+
     def _descend_neg_expr(self) -> Tree:
         expr_or_op = self.peek(0)
         if expr_or_op.kind == SqTokenKind.MINUS:
@@ -271,7 +271,7 @@ class SerqParser:
             rhs = self._descend_plus_expr()
             expr = self._wrap_expr(Tree("binary_expression", children=[expr, op, rhs]))
         return expr
-    
+
     def _descend_not_expr(self) -> Tree:
         expr_or_op = self.peek(0)
         if expr_or_op.kind == SqTokenKind.NOT:
@@ -317,6 +317,21 @@ class SerqParser:
 
         if self.peek(0).kind == SqTokenKind.COLON:
             res.add(self._eat_user_type())
+
+        self.expect([SqTokenKind.EQ])
+        res.add(self._eat_expression())
+        return res
+
+    def _eat_const(self) -> Tree:
+        self.expect([SqTokenKind.CONST])
+        res = Tree("const_stmt", children=[self._cur_pub])
+        self._cur_pub = None
+        res.add(self._eat_identifier())
+
+        if self.peek(0).kind == SqTokenKind.COLON:
+            res.add(self._eat_user_type())
+        else:
+            res.add(None)
 
         self.expect([SqTokenKind.EQ])
         res.add(self._eat_expression())
@@ -467,7 +482,7 @@ class SerqParser:
 
         if self._cur_decorator != None and tok.kind not in [SqTokenKind.FN, SqTokenKind.STRUCT, SqTokenKind.PUB]:
             raise ParserError(f"Invalid token for decorator: {tok.kind}")
-        if self._cur_pub != None and tok.kind not in [SqTokenKind.FN, SqTokenKind.STRUCT]:
+        if self._cur_pub != None and tok.kind not in [SqTokenKind.FN, SqTokenKind.STRUCT, SqTokenKind.CONST]:
             raise ParserError(f"Invalid token for pub: {tok.kind}")
 
         match tok.kind:
@@ -487,9 +502,9 @@ class SerqParser:
             case SqTokenKind.ALIAS:
                 result.add(self._eat_alias())
             case SqTokenKind.LET:
-                if self._cur_decorator != None:
-                    raise ParserError("Decorators aren't allowed for let statements")
                 result.add(self._eat_let())
+            case SqTokenKind.CONST:
+                result.add(self._eat_const())
             case SqTokenKind.RETURN:
                 self.advance()
                 prev_skip = self._skip_newlines
