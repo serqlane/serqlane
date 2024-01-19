@@ -854,6 +854,38 @@ class Scope:
             return sym
         return None
 
+    def lookup_typed_sym(self, name: str, expected_type: Type) -> NodeSymbol:
+        candidates: list[NodeSymbol] = []
+        has_fn = False
+        for sym in self.iter_syms(shadowing_rule=ShadowingRule.allowed, name=name, include_imports=True):
+            if sym.type.is_alias():
+                assert isinstance(sym.definition_node, NodeAliasDefinition)
+                sym = sym.definition_node.skip_safe_aliases()
+            if expected_type == None or expected_type.types_compatible(sym.type) \
+                or (expected_type.kind == TypeKind.function and sym.type.kind == TypeKind.struct): # TODO: WORKAROUND! Replace
+                candidates.append(NodeSymbol(sym, sym.type))
+                if sym.type.kind == TypeKind.function:
+                    has_fn = True
+
+        if len(candidates) > 1:
+            if has_fn:
+                raise ValueError(f"Encountered an ambiguous identifier: {name}")
+
+            block_shadowing = False
+            for i in range(len(candidates) - 1, -1, -1):
+                rule = candidates[i].symbol.shadowing_rule
+                if rule == ShadowingRule.forbidden:
+                    block_shadowing = True
+                    break
+            if block_shadowing:
+                # for overload resolution with ambiguous types like literal ints as params
+                raise ValueError(f"Encountered an ambiguous identifier: {name}")
+            return candidates[0]
+        elif len(candidates) == 1:
+            return candidates[0]
+        else:
+            raise ValueError(f"Unable to find identifier {name}")
+
     def lookup(self, name: str, shadowing_rule: ShadowingRule) -> Optional[Symbol]:
         # Must be unambiguous, can return an unexported symbol. Checked at calltime
         magic = self.module_graph.builtin_scope._lookup_impl(name, shadowing_rule=ShadowingRule.shallow) # TODO: hack
@@ -1345,38 +1377,8 @@ class CompCtx:
 
     def identifier(self, tree: Tree, expected_type: Type) -> NodeSymbol:
         assert tree.data == "identifier", tree.data
-        val = tree.children[0].value
-
-        candidates: list[NodeSymbol] = []
-        has_fn = False
-        for sym in self.current_scope.iter_syms(shadowing_rule=ShadowingRule.allowed, name=val, include_imports=True):
-            if sym.type.is_alias():
-                assert isinstance(sym.definition_node, NodeAliasDefinition)
-                sym = sym.definition_node.skip_safe_aliases()
-            if expected_type == None or expected_type.types_compatible(sym.type) \
-                or (expected_type.kind == TypeKind.function and sym.type.kind == TypeKind.struct): # TODO: WORKAROUND! Replace
-                candidates.append(NodeSymbol(sym, sym.type))
-                if sym.type.kind == TypeKind.function:
-                    has_fn = True
-
-        if len(candidates) > 1:
-            if has_fn:
-                raise ValueError(f"Encountered an ambiguous identifier: {val}")
-
-            block_shadowing = False
-            for i in range(len(candidates) - 1, -1, -1):
-                rule = candidates[i].symbol.shadowing_rule
-                if rule == ShadowingRule.forbidden:
-                    block_shadowing = True
-                    break
-            if block_shadowing:
-                # for overload resolution with ambiguous types like literal ints as params
-                raise ValueError(f"Encountered an ambiguous identifier: {val}")
-            return candidates[0]
-        elif len(candidates) == 1:
-            return candidates[0]
-        else:
-            raise ValueError(f"Unable to find identifier {val}")
+        name = tree.children[0].value
+        return self.current_scope.lookup_typed_sym(name, expected_type)
 
     def user_type(self, tree: Tree) -> NodeSymbol:
         assert tree.data in ["user_type", "return_user_type"], tree.data
