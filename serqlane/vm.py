@@ -420,3 +420,4 @@ class SerqVM:
 
         self.enter_scope()
         self.execute_node(start)
+        self.exit_scope()
