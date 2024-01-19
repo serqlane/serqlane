@@ -57,6 +57,8 @@ class SqTokenKind(Enum):
     MUT = "mut"
     PUB = "pub"
 
+    FOR = "for"
+    IN = "in"
     WHILE = "while"
     IF = "if"
     ELSE = "else"

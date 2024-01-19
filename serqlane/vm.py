@@ -356,7 +356,7 @@ class SerqVM:
                     else:
                         self.set_value_on_stack(child.lhs.symbol, self.eval(child.rhs))
 
-                case NodeBlockStmt():
+                case NodeBlockStmt() | NodeStmtList():
                     self.enter_scope()
                     return_value = self.execute_node(child)
                     self.exit_scope()
