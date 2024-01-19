@@ -854,10 +854,10 @@ class Scope:
             return sym
         return None
 
-    def lookup_typed_sym(self, name: str, expected_type: Type) -> NodeSymbol:
+    def lookup_typed_sym(self, name: str, expected_type: Type, include_imports=False, only_public=False, include_magics=False) -> NodeSymbol:
         candidates: list[NodeSymbol] = []
         has_fn = False
-        for sym in self.iter_syms(shadowing_rule=ShadowingRule.allowed, name=name, include_imports=True):
+        for sym in self.iter_syms(shadowing_rule=ShadowingRule.allowed, name=name, include_imports=include_imports, only_public=only_public, include_magics=include_magics):
             if sym.type.is_alias():
                 assert isinstance(sym.definition_node, NodeAliasDefinition)
                 sym = sym.definition_node.skip_safe_aliases()
@@ -1355,15 +1355,8 @@ class CompCtx:
                         return NodeDotAccess(lhs, NodeSymbol(matching_field_sym, matching_field_sym.type))
                     case TypeKind.module:
                         assert isinstance(lhs.type.data, Module)
-                        warnings.warn("Module disambiguation must use the same logic as identifier. Do not merge.")
-                        candidates: list[NodeSymbol] = []
-                        for sym in lhs.type.data.global_scope.iter_syms(shadowing_rule=ShadowingRule.allowed, name=rhs, only_public=True, include_magics=False):
-                            if self.current_scope.is_imported(lhs.type.data, sym):
-                                candidates.append(NodeSymbol(sym, sym.type))
-                        if len(candidates) == 1:
-                            return NodeDotAccess(lhs, candidates[0])
-                        else:
-                            raise ValueError(f"Bad module access: {rhs}")
+                        rhs_sym = lhs.type.data.global_scope.lookup_typed_sym(name=rhs, expected_type=expected_type, only_public=True)
+                        return NodeDotAccess(lhs, rhs_sym)
                     case TypeKind.namespace:
                         syms: list[Symbol] = list(lhs.type.data.iter_syms(shadowing_rule=ShadowingRule.allowed, name=rhs, include_magics=False))
                         if len(syms) != 1:
@@ -1378,7 +1371,7 @@ class CompCtx:
     def identifier(self, tree: Tree, expected_type: Type) -> NodeSymbol:
         assert tree.data == "identifier", tree.data
         name = tree.children[0].value
-        return self.current_scope.lookup_typed_sym(name, expected_type)
+        return self.current_scope.lookup_typed_sym(name, expected_type, include_imports=True, include_magics=True)
 
     def user_type(self, tree: Tree) -> NodeSymbol:
         assert tree.data in ["user_type", "return_user_type"], tree.data
