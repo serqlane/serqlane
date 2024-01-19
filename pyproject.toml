@@ -2,7 +2,7 @@
 name = "serqlane"
 version = "0.1.0"
 description = "the serqlane programming language"
-authors = ["StarrFox <starrfox6312@gmail.com>"]
+authors = ["StarrFox <starrfox6312@gmail.com>", "SirOlaf"]
 license = "MIT"
 readme = "README.md"
 
