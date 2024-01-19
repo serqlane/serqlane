@@ -94,6 +94,14 @@ true()
 # code, expected
 overload_tests = [
 ("""
+fn foo(x: int32) { dbg(32) }
+fn foo(x: int64) { dbg(64) }
+
+let x: int64 = 10
+foo(x)
+""", 64),
+(
+"""
 fn abc(a: int64) -> int64 {
     a
 }
