@@ -23,14 +23,16 @@ RESERVED_KEYWORDS = [
     "continue",
     "else",
     "fn",
+    "from"
     "if",
+    "import"
     "let",
     "mut",
     "not",
     "or",
     "return",
-    "while",
     "struct",
+    "while",
 ]
 
 
