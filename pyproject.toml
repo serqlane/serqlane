@@ -19,6 +19,12 @@ optional = true
 [tool.poetry.group.fuzz.dependencies]
 hypothesis = {extras = ["lark"], version = "^6.91.0"}
 
+[tool.poetry.group.benchmarks]
+optional = true
+
+[tool.poetry.group.benchmarks.dependencies]
+pytest-benchmark = "^4.0.0"
+
 [tool.poetry.scripts]
 serqlane = "serqlane.__main__:main"
 
