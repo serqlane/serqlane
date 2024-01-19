@@ -943,6 +943,7 @@ class Scope:
     # special type of let, always shadow and fake immutable
     def put_iter_let(self, name: str) -> Symbol:
         sym = self.put(name, shadowing_rule=ShadowingRule.allowed)
+        sym.hidden_mutable = True
         return sym
 
     # consts are checked shallowly
@@ -1130,7 +1131,6 @@ class CompCtx:
         range_expr = self.range_expression(tree.children[1])
         iter_var = self.current_scope.put_iter_let(tree.children[0].children[0].value)
         iter_var.type = range_expr.start.type
-        iter_var.hidden_mutable = True
         iter_var = NodeSymbol(iter_var, iter_var.type)
         cond_node = NodeLessExpression(
             iter_var,
