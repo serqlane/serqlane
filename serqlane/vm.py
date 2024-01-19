@@ -294,7 +294,7 @@ class SerqVM:
 
             case NodeDotAccess():
                 left = self.eval(expression.lhs)
-                return getattr(left, expression.rhs.qualified_name())
+                return getattr(left, expression.rhs.symbol.qualified_name())
 
             case NodeAliasDefinition():
                 return expression.src
@@ -350,7 +350,7 @@ class SerqVM:
                     if isinstance(child.lhs, NodeDotAccess):
                         setattr(
                             self.eval(child.lhs.lhs),
-                            child.lhs.rhs.qualified_name(),
+                            child.lhs.rhs.symbol.qualified_name(),
                             self.eval(child.rhs),
                         )
                     else:

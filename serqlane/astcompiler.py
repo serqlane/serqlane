@@ -6,6 +6,7 @@ from typing import Any, Optional, Iterator
 import pathlib
 import hashlib
 import textwrap
+import warnings
 
 from serqlane.parser import Token, Tree, SerqParser
 from serqlane.common import SerqInternalError
@@ -68,24 +69,6 @@ class NodeModuleSymbol(Node):
 
     def render(self) -> str:
         return f"{self.symbol.render()}"
-
-class NodeOptions(Node):
-    def __init__(self, type: Type) -> None:
-        super().__init__(type)
-        self.options: list[Node] = []
-
-    def extract_unambiguous(self) -> Node:
-        if len(self.options) != 1:
-            raise ValueError(f"Failed to extract an unambiguous node: {[x.render() for x in self.options]}")
-        return self.use_first()
-
-    def use_first(self) -> Node:
-        assert len(self.options) > 0
-        return self.options[0]
-
-    def render(self) -> str:
-        # Just use the first sym, if this appears in the final ast that's a bug
-        return f"{self.options[0].render()}"
 
 class NodeStmtList(Node):
     def __init__(self, type: Type) -> None:
@@ -218,10 +201,11 @@ class NodeGreaterEqualsExpression(NodeBinaryExpr):
         return f"({self.lhs.render()} >= {self.rhs.render()})"
 
 class NodeDotAccess(Node):
-    def __init__(self, lhs: Node, rhs: Symbol) -> None:
+    def __init__(self, lhs: Node, rhs: NodeSymbol) -> None:
         super().__init__(rhs.type)
         self.lhs = lhs
         self.rhs = rhs
+        assert isinstance(self.rhs, NodeSymbol)
 
     def render(self) -> str:
         return f"{self.lhs.render()}.{self.rhs.render()}"
@@ -382,7 +366,7 @@ class NodeImport(Node):
         return f"import {self.orig_path}"
 
 class NodeFromImport(Node):
-    def __init__(self, module_sym: Symbol, to_import: list[NodeOptions], orig_path: str, type: Type, *, wildcard=False) -> None:
+    def __init__(self, module_sym: Symbol, to_import: list[NodeSymbol], orig_path: str, type: Type, *, wildcard=False) -> None:
         super().__init__(type)
         self.module_sym = module_sym
         self.to_import = to_import
@@ -397,8 +381,14 @@ class NodeFromImport(Node):
             return f"from {self.orig_path} import [{names}]"
 
 
+class ShadowingRule(Enum):
+    forbidden = auto() # never allowed to shadow
+    allowed = auto() # always allowed to shadow
+    shallow = auto() # shallow check allows shadowing inside of a scope
+
+
 class Symbol:
-    def __init__(self, id: str, name: str, type: Type = None, mutable: bool = False, magic=False, *, source_module: Optional[Module]) -> None:
+    def __init__(self, id: str, name: str, shadowing_rule: ShadowingRule, type: Type = None, mutable: bool = False, magic=False, *, source_module: Optional[Module]) -> None:
         self.id = id
         self.name = name
         self.type = type
@@ -407,6 +397,7 @@ class Symbol:
         self.definition_node: Node = None
         self.magic = magic
         self._source_module = source_module
+        self.shadowing_rule = shadowing_rule
 
     def comes_from_module(self, module: Module):
         if self._source_module == None:
@@ -584,7 +575,7 @@ class Type:
         assert self.is_indexable()
         match self.kind:
             case TypeKind.string | TypeKind.literal_string:
-                return graph.request_module(MAGIC_MODULE_NAME).global_scope.lookup_type("char")
+                return graph.request_module(MAGIC_MODULE_NAME).global_scope.lookup_type("char", shadowing_rule=ShadowingRule.allowed)
             case _:
                 raise NotImplementedError()
 
@@ -622,7 +613,18 @@ class Type:
                 return lhs.kind == rhs.kind
 
             case TypeKind.function:
-                raise NotImplementedError() # TODO
+                if rhs.kind != TypeKind.function:
+                    return False
+                lhs_args = lhs.function_arg_types()
+                rhs_args = rhs.function_arg_types()
+                if len(lhs_args) != len(rhs_args):
+                    # TODO: Fix this for optional args
+                    return False
+                for i in range(0, len(lhs_args)):
+                    if not lhs_args[i].types_compatible(rhs_args[i]):
+                        return False
+                # TODO: Generics?
+                return lhs.return_type().types_compatible(rhs.return_type())
 
             # magic types
 
@@ -697,13 +699,13 @@ class Type:
         assert self.is_literal_type()
         match self.kind:
             case TypeKind.literal_int:
-                return graph.request_module(MAGIC_MODULE_NAME).global_scope.lookup_type("int64")
+                return graph.request_module(MAGIC_MODULE_NAME).global_scope.lookup_type("int64", shadowing_rule=ShadowingRule.allowed)
             case TypeKind.literal_float:
-                return graph.request_module(MAGIC_MODULE_NAME).global_scope.lookup_type("float64")
+                return graph.request_module(MAGIC_MODULE_NAME).global_scope.lookup_type("float64", shadowing_rule=ShadowingRule.allowed)
             case TypeKind.literal_bool:
-                return graph.request_module(MAGIC_MODULE_NAME).global_scope.lookup_type("bool")
+                return graph.request_module(MAGIC_MODULE_NAME).global_scope.lookup_type("bool", shadowing_rule=ShadowingRule.allowed)
             case TypeKind.literal_string:
-                return graph.request_module(MAGIC_MODULE_NAME).global_scope.lookup_type("string")
+                return graph.request_module(MAGIC_MODULE_NAME).global_scope.lookup_type("string", shadowing_rule=ShadowingRule.allowed)
             case _:
                 raise SerqInternalError(f"Forgot a literal type: {self.kind}")
 
@@ -717,6 +719,8 @@ class Type:
             return f"fn({args}): {self.data[1].render()}"
         elif self.kind == TypeKind.struct:
             return self.sym.definition_node.render()
+        elif self.kind == TypeKind.infer:
+            return "<infer>"
         else:
             raise SerqInternalError(f"Render isn't implemented for type kind {self.kind}")
 
@@ -789,22 +793,21 @@ class Scope:
 
     def do_from_import(self, node: NodeFromImport):
         if node.wildcard:
-            syms = list(node.module_sym.type.data.global_scope.iter_syms(only_public=True, include_magics=False, include_imports=False))
+            syms = list(node.module_sym.type.data.global_scope.iter_syms(shadowing_rule=ShadowingRule.shallow, only_public=True, include_magics=False, include_imports=False))
             self._imported_syms[node.module_sym.type.data] = syms
         else:
-            syms = []
-            for options in node.to_import:
-                for option in options.options:
-                    if not isinstance(option, NodeSymbol):
-                        raise ValueError("Tried to import a non-symbol")
-                    syms.append(option.symbol)
+            syms: list[Symbol] = []
+            for isym in node.to_import:
+                if not isinstance(isym, NodeSymbol):
+                    raise ValueError("Tried to import a non-symbol")
+                syms.append(isym.symbol)
             self._imported_syms[node.module_sym.type.data] = syms
         self._inject_import_namespaces(node.orig_path, node.module_sym)
 
-    def _iter_syms_impl(self, shallow=False, *, include_magics=True, include_imports=False) -> Iterator[Symbol]:
+    def _iter_syms_impl(self, shadowing_rule: ShadowingRule, *, include_magics=True, include_imports=False) -> Iterator[Symbol]:
         # prefer magics
         if self.module_graph.builtin_scope != self and include_magics:
-            for sym in self.module_graph.builtin_scope._iter_syms_impl():
+            for sym in self.module_graph.builtin_scope._iter_syms_impl(shadowing_rule=shadowing_rule):
                 yield sym
 
         # local lookup
@@ -830,11 +833,11 @@ class Scope:
                     yield sym
 
         # parent lookup
-        if not shallow and self.parent != None:
-            yield from self.parent._iter_syms_impl(include_magics=False, include_imports=include_imports)
+        if shadowing_rule != ShadowingRule.shallow and self.parent != None:
+            yield from self.parent._iter_syms_impl(shadowing_rule=shadowing_rule, include_magics=False, include_imports=include_imports)
 
-    def iter_syms(self, name: Optional[str] = None, shallow=False, *, include_magics=True, only_public=False, include_imports=False) -> Iterator[Symbol]:
-        for sym in self._iter_syms_impl(shallow=shallow, include_magics=include_magics, include_imports=include_imports):
+    def iter_syms(self, shadowing_rule: ShadowingRule, name: Optional[str] = None, *, include_magics=True, only_public=False, include_imports=False) -> Iterator[Symbol]:
+        for sym in self._iter_syms_impl(shadowing_rule=shadowing_rule, include_magics=include_magics, include_imports=include_imports):
             if name != None and sym.name != name:
                 continue
             if only_public and not sym.public:
@@ -842,85 +845,118 @@ class Scope:
             yield sym
 
     def iter_function_defs(self, name: Optional[str] = None, only_public=False, include_imports=True) -> Iterator[Symbol]:
-        for sym in self.iter_syms(name, only_public=only_public, include_imports=include_imports):
+        for sym in self.iter_syms(shadowing_rule=ShadowingRule.allowed, name=name, only_public=only_public, include_imports=include_imports):
             if sym.type.is_callable_type():
                 yield sym
 
-    def _lookup_impl(self, name: str, shallow=False) -> Symbol:
-        for sym in self.iter_syms(name, shallow=shallow, include_imports=True):
+    def _lookup_impl(self, name: str, shadowing_rule: ShadowingRule) -> Symbol:
+        for sym in self.iter_syms(shadowing_rule=shadowing_rule, name=name, include_imports=True):
             return sym
         return None
 
-    def lookup(self, name: str, shallow=False) -> Optional[Symbol]:
+    def lookup_typed_sym(self, name: str, expected_type: Type, include_imports=False, only_public=False, include_magics=False) -> NodeSymbol:
+        candidates: list[NodeSymbol] = []
+        has_fn = False
+        for sym in self.iter_syms(shadowing_rule=ShadowingRule.allowed, name=name, include_imports=include_imports, only_public=only_public, include_magics=include_magics):
+            if sym.type.is_alias():
+                assert isinstance(sym.definition_node, NodeAliasDefinition)
+                sym = sym.definition_node.skip_safe_aliases()
+            if expected_type == None or expected_type.types_compatible(sym.type) \
+                or (expected_type.kind == TypeKind.function and sym.type.kind == TypeKind.struct): # TODO: WORKAROUND! Replace
+                candidates.append(NodeSymbol(sym, sym.type))
+                if sym.type.kind == TypeKind.function:
+                    has_fn = True
+
+        if len(candidates) > 1:
+            if has_fn:
+                raise ValueError(f"Encountered an ambiguous identifier: {name}")
+
+            block_shadowing = False
+            for i in range(len(candidates) - 1, -1, -1):
+                rule = candidates[i].symbol.shadowing_rule
+                if rule == ShadowingRule.forbidden:
+                    block_shadowing = True
+                    break
+            if block_shadowing:
+                # for overload resolution with ambiguous types like literal ints as params
+                raise ValueError(f"Encountered an ambiguous identifier: {name}")
+            return candidates[0]
+        elif len(candidates) == 1:
+            return candidates[0]
+        else:
+            raise ValueError(f"Unable to find identifier {name}")
+
+    def lookup(self, name: str, shadowing_rule: ShadowingRule) -> Optional[Symbol]:
         # Must be unambiguous, can return an unexported symbol. Checked at calltime
-        magic = self.module_graph.builtin_scope._lookup_impl(name, shallow=True) # TODO: hack
+        magic = self.module_graph.builtin_scope._lookup_impl(name, shadowing_rule=ShadowingRule.shallow) # TODO: hack
         if magic:
             return magic
-        return self._lookup_impl(name, shallow)
+        return self._lookup_impl(name, shadowing_rule=shadowing_rule)
 
-    def lookup_type(self, name: str, shallow=False) -> Optional[Type]:
+    def lookup_type(self, name: str, shadowing_rule: ShadowingRule) -> Optional[Type]:
         # helper for trivial case of sym.type
-        sym = self.lookup(name, shallow=shallow)
+        sym = self.lookup(name, shadowing_rule=shadowing_rule)
         if sym != None:
             return sym.type
 
     def inject(self, sym: Symbol):
         self._local_syms.append(sym)
 
-    def put(self, name: str, checked=True, shallow=False) -> Symbol:
-        assert type(name) == str
-        if checked and self.lookup(name, shallow=shallow): raise ValueError(f"redefinition of {name}")
 
-        result = Symbol(self.module_graph.sym_id_gen.next(), name=name, source_module=self.module)
+    def put(self, name: str, *, shadowing_rule: ShadowingRule) -> Symbol:
+        assert type(name) == str
+
+        if shadowing_rule != ShadowingRule.allowed:
+            if self.lookup(name, shadowing_rule=shadowing_rule):
+                raise ValueError(f"redefinition of {name}")
+
+        result = Symbol(self.module_graph.sym_id_gen.next(), name=name, shadowing_rule=shadowing_rule, source_module=self.module)
         self.inject(result)
         return result
 
-    def put_alias(self, name: str) -> Symbol:
-        sym = self.put(name)
-        sym.type = Type(TypeKind.alias, sym)
-        return sym
-
-    def put_function(self, name: str, type: Type) -> Symbol:
-        assert type.kind == TypeKind.function
-        for fn in self.iter_function_defs(name):
-            if fn.type.function_def_args_identical(type):
-                raise ValueError(f"Redefinition of function {name}")
-        sym = self.put(name, checked=False)
-        sym.type = type
-        return sym
-
-    def put_magic(self, name: str) -> Symbol:
-        assert type(name) == str
-        if self.lookup(name, shallow=True): raise SerqInternalError(f"redefinition of magic sym: {name}")
-        result = Symbol(self.module_graph.sym_id_gen.next(), name=name, magic=True, source_module=self.module)
-        self._local_syms.append(result)
-        return result
-
-    def put_magic_function(self, name: str, typ: Type) -> Symbol:
-        assert type(name) == str
-        sym = self.put_function(name, typ)
-        sym.magic = True
-        return sym
-
-    def put_builtin_type(self, kind: TypeKind) -> Symbol:
-        # TODO: Get rid of this hack
-        sym = self.put_magic(kind.name)
-        sym.type = Type(kind=kind, sym=sym)
-        return sym
-
+    # structs are not allowed to shadow
     def put_struct(self, name: str) -> Symbol:
-        sym = self.put(name)
+        sym = self.put(name, shadowing_rule=ShadowingRule.forbidden)
         sym.type = Type(kind=TypeKind.struct, sym=sym)
         return sym
 
-    def put_let(self, name: str, mutable=False, checked=True, shallow=False) -> Symbol:
-        sym = self.put(name, checked=checked, shallow=shallow)
+    # struct fields are checked shallowly
+    def put_struct_field(self, name: str) -> Symbol:
+        return self.put(name, shadowing_rule=ShadowingRule.shallow)
+
+    # lets are checked shallowly
+    def put_let(self, name: str, mutable: bool) -> Symbol:
+        sym = self.put(name, shadowing_rule=ShadowingRule.shallow)
         sym.mutable = mutable
+        return sym
+
+    # consts are checked shallowly
+    def put_const(self, name: str) -> Symbol:
+        return self.put(name, shadowing_rule=ShadowingRule.shallow)
+
+    # aliases are checked shallowly
+    def put_alias(self, name: str) -> Symbol:
+        sym = self.put(name, shadowing_rule=ShadowingRule.shallow)
+        sym.type = Type(kind=TypeKind.alias, sym=sym)
+        return sym
+
+    # parameters are allowed to shadow
+    def put_parameter(self, name: str) -> Symbol:
+        return self.put(name, shadowing_rule=ShadowingRule.allowed)
+
+    # functions are allowed to shadow as long as the parameter types are different
+    def put_function(self, name: str, typ: Type) -> Symbol:
+        assert typ.kind == TypeKind.function
+        for fn in self.iter_function_defs(name):
+            if fn.type.function_def_args_identical(typ):
+                raise ValueError(f"Redefinition of function {name}")
+        sym = self.put(name, shadowing_rule=ShadowingRule.allowed)
+        sym.type = typ
         return sym
 
     def put_namespace(self, name: str) -> Symbol:
         existing: Optional[Symbol] = None
-        for s in self.iter_syms(name, include_magics=False):
+        for s in self.iter_syms(shadowing_rule=ShadowingRule.shallow, name=name, include_magics=False):
             if s.type.kind == TypeKind.namespace:
                 existing = s
         if existing != None:
@@ -973,7 +1009,7 @@ class CompCtx:
         return Type(kind=TypeKind.infer, sym=None)
 
     def get_unit_type(self) -> Type:
-        return self.current_scope.lookup_type("unit", shallow=True)
+        return self.current_scope.lookup_type("unit", shadowing_rule=ShadowingRule.shallow)
 
 
     def statement(self, tree: Tree, expected_type: Type) -> Node:
@@ -1018,12 +1054,12 @@ class CompCtx:
         to_import = []
         if not wildcard:
             for ident in names:
-                option_node = NodeOptions(self.get_unit_type())
-                for sym in module.global_scope.iter_syms(name=ident, include_magics=False, only_public=True):
-                    option_node.options.append(NodeSymbol(sym, sym.type))
-                if len(option_node.options) == 0:
+                found_syms: list[NodeSymbol] = []
+                for sym in module.global_scope.iter_syms(shadowing_rule=ShadowingRule.shallow, name=ident, include_magics=False, only_public=True):
+                    found_syms.append(NodeSymbol(sym, sym.type))
+                if len(found_syms) == 0:
                     raise ValueError(f"Could not find public symbol `{ident}` in module `{module.name}`")
-                to_import.append(option_node)
+                to_import.extend(found_syms)
         res = NodeFromImport(
             module_sym=module.sym,
             to_import=to_import,
@@ -1066,7 +1102,7 @@ class CompCtx:
         assert tree.data == "while_stmt", tree.data
         assert expected_type.kind == TypeKind.unit
         # This has to use the outer scope, so a new scope is only opened once this has been checked in full
-        while_cond = self.expression(tree.children[0], self.current_scope.lookup_type("bool", shallow=True))
+        while_cond = self.expression(tree.children[0], self.current_scope.lookup_type("bool", shadowing_rule=ShadowingRule.allowed))
         assert while_cond.type.kind == TypeKind.bool
 
         # block_stmt opens a scope
@@ -1080,9 +1116,7 @@ class CompCtx:
         assert tree.data == "if_stmt", tree.data
         assert expected_type.kind in [TypeKind.unit, TypeKind.infer] # TODO: if expressions are not unit, need to guarantee valid else branch
         # Same scoping story as in while_stmt
-        if_cond = self.expression(tree.children[0], self.current_scope.lookup_type("bool", shallow=True))
-        if isinstance(if_cond, NodeOptions):
-            if_cond = if_cond.extract_unambiguous()
+        if_cond = self.expression(tree.children[0], self.current_scope.lookup_type("bool", shadowing_rule=ShadowingRule.allowed))
         assert if_cond.type.kind == TypeKind.bool
         if_body = self.handle_block(tree.children[1], self.get_unit_type())
 
@@ -1112,8 +1146,6 @@ class CompCtx:
 
         if expected_type != None:
             last = self.statement(last_child, expected_type)
-            if isinstance(last, NodeOptions):
-                last = last.use_first()
             result.add(last)
             # TODO: Get rid of check here once shadow syms are in
             assert expected_type.types_compatible(result.children[-1].type), f"Expected type {expected_type.sym.render()} for block but got {result.children[-1].type.sym.render()}"
@@ -1150,7 +1182,7 @@ class CompCtx:
 
         if expected_type != None:
             if expected_type.is_free_infer_type():
-                expected_type = self.current_scope.lookup_type(lookup_name, shallow=False)
+                expected_type = self.current_scope.lookup_type(lookup_name, shadowing_rule=ShadowingRule.allowed)
             else:
                 if not expected_type.types_compatible(Type(literal_kind, sym=None)):
                     raise SerqTypeInferError()
@@ -1182,15 +1214,11 @@ class CompCtx:
     def binary_expression(self, tree: Tree, expected_type: Type) -> NodeBinaryExpr:
         assert tree.data == "binary_expression", tree.data
         lhs = self.expression(tree.children[0], None)
-        if isinstance(lhs, NodeOptions):
-            lhs = lhs.use_first()
         # TODO: Can the symbol be captured somehow?
         op = tree.children[1].data
         # a dot expression does not work by the same type rules
         if op != "dot":
             rhs = self.expression(tree.children[2], None)
-            if isinstance(rhs, NodeOptions):
-                rhs = rhs.use_first()
 
             lhs_lit = isinstance(lhs, NodeLiteral)
             rhs_lit = isinstance(rhs, NodeLiteral)
@@ -1211,34 +1239,22 @@ class CompCtx:
             # if there is a known type, spread it around
             if lhs.type.is_literal_type() and not rhs.type.is_literal_type():
                 lhs = self.expression(tree.children[0], rhs.type)
-                if isinstance(lhs, NodeOptions):
-                    lhs = lhs.use_first()
             elif rhs.type.is_literal_type() and not lhs.type.is_literal_type():
                 rhs = self.expression(tree.children[2], lhs.type)
-                if isinstance(rhs, NodeOptions):
-                    rhs = rhs.use_first()
 
             # both literal
             else:
                 # if possible we ask for help from expected_type
                 if expected_type != None and expr_type.types_compatible(expected_type):
                     lhs = self.expression(tree.children[0], expected_type)
-                    if isinstance(lhs, NodeOptions):
-                        lhs = lhs.use_first()
                     rhs = self.expression(tree.children[2], expected_type)
-                    if isinstance(rhs, NodeOptions):
-                        rhs = rhs.use_first()
                     assert lhs.type.types_compatible(rhs.type)
                     expr_type = lhs.type
 
                 # no expectation, let them infer their own types
                 elif expected_type == None:
                     lhs = self.expression(tree.children[0], self.get_infer_type())
-                    if isinstance(lhs, NodeOptions):
-                        lhs = lhs.use_first()
                     rhs = self.expression(tree.children[2], self.get_infer_type())
-                    if isinstance(rhs, NodeOptions):
-                        rhs = rhs.use_first()
                     assert lhs.type.types_compatible(rhs.type)
                     expr_type = lhs.type
 
@@ -1295,38 +1311,36 @@ class CompCtx:
 
             case "equals":
                 if both_lit:
-                    return NodeBoolLit(lhs.value == rhs.value, type=self.current_scope.lookup_type("bool"))
-                return NodeEqualsExpression(lhs, rhs, type=self.current_scope.lookup_type("bool"))
+                    return NodeBoolLit(lhs.value == rhs.value, type=self.current_scope.lookup_type("bool", shadowing_rule=ShadowingRule.allowed))
+                return NodeEqualsExpression(lhs, rhs, type=self.current_scope.lookup_type("bool", shadowing_rule=ShadowingRule.allowed))
             case "not_equals":
                 if both_lit:
-                    return NodeBoolLit(lhs.value != rhs.value, type=self.current_scope.lookup_type("bool"))
-                return NodeNotEqualsExpression(lhs, rhs, type=self.current_scope.lookup_type("bool"))
+                    return NodeBoolLit(lhs.value != rhs.value, type=self.current_scope.lookup_type("bool", shadowing_rule=ShadowingRule.allowed))
+                return NodeNotEqualsExpression(lhs, rhs, type=self.current_scope.lookup_type("bool", shadowing_rule=ShadowingRule.allowed))
             case "less":
                 # TODO: Ordinal types.
                 assert expr_type.is_arith_type()
                 if both_lit:
-                    return NodeBoolLit(lhs.value < rhs.value, type=self.current_scope.lookup_type("bool"))
-                return NodeLessExpression(lhs, rhs, type=self.current_scope.lookup_type("bool"))
+                    return NodeBoolLit(lhs.value < rhs.value, type=self.current_scope.lookup_type("bool", shadowing_rule=ShadowingRule.allowed))
+                return NodeLessExpression(lhs, rhs, type=self.current_scope.lookup_type("bool", shadowing_rule=ShadowingRule.allowed))
             case "lesseq":
                 assert expr_type.is_arith_type()
                 if both_lit:
-                    return NodeBoolLit(lhs.value <= rhs.value, type=self.current_scope.lookup_type("bool"))
-                return NodeLessEqualsExpression(lhs, rhs, type=self.current_scope.lookup_type("bool"))
+                    return NodeBoolLit(lhs.value <= rhs.value, type=self.current_scope.lookup_type("bool", shadowing_rule=ShadowingRule.allowed))
+                return NodeLessEqualsExpression(lhs, rhs, type=self.current_scope.lookup_type("bool", shadowing_rule=ShadowingRule.allowed))
             case "greater":
                 assert expr_type.is_arith_type()
                 if both_lit:
-                    return NodeBoolLit(lhs.value > rhs.value, type=self.current_scope.lookup_type("bool"))
-                return NodeGreaterExpression(lhs, rhs, type=self.current_scope.lookup_type("bool"))
+                    return NodeBoolLit(lhs.value > rhs.value, type=self.current_scope.lookup_type("bool", shadowing_rule=ShadowingRule.allowed))
+                return NodeGreaterExpression(lhs, rhs, type=self.current_scope.lookup_type("bool", shadowing_rule=ShadowingRule.allowed))
             case "greatereq":
                 assert expr_type.is_arith_type()
                 if both_lit:
-                    return NodeBoolLit(lhs.value >= rhs.value, type=self.current_scope.lookup_type("bool"))
-                return NodeGreaterEqualsExpression(lhs, rhs, type=self.current_scope.lookup_type("bool"))
+                    return NodeBoolLit(lhs.value >= rhs.value, type=self.current_scope.lookup_type("bool", shadowing_rule=ShadowingRule.allowed))
+                return NodeGreaterEqualsExpression(lhs, rhs, type=self.current_scope.lookup_type("bool", shadowing_rule=ShadowingRule.allowed))
 
             case "dot":
                 lhs = self.expression(tree.children[0], None)
-                if isinstance(lhs, NodeOptions):
-                    lhs = lhs.use_first() # TODO: This WILL cause bad symbol lookup
                 rhs = tree.children[2].children[0].value
 
                 match lhs.type.kind:
@@ -1342,18 +1356,13 @@ class CompCtx:
                                 break
                         assert matching_field_sym != None, f"Could not find {rhs} for {lhs.type.sym.render()}"
 
-                        return NodeDotAccess(lhs, matching_field_sym)
+                        return NodeDotAccess(lhs, NodeSymbol(matching_field_sym, matching_field_sym.type))
                     case TypeKind.module:
                         assert isinstance(lhs.type.data, Module)
-                        options = NodeOptions(self.get_unit_type())
-                        for sym in lhs.type.data.global_scope.iter_syms(name=rhs, shallow=True, only_public=True, include_magics=False):
-                            if self.current_scope.is_imported(lhs.type.data, sym):
-                                options.options.append(NodeSymbol(sym, sym.type))
-                        if len(options.options) < 1:
-                            raise ValueError(f"Could not find {rhs} in module {lhs.render()}")
-                        return NodeDotAccess(lhs, options)
+                        rhs_sym = lhs.type.data.global_scope.lookup_typed_sym(name=rhs, expected_type=expected_type, only_public=True)
+                        return NodeDotAccess(lhs, rhs_sym)
                     case TypeKind.namespace:
-                        syms = list(lhs.type.data.iter_syms(name=rhs, include_magics=False))
+                        syms: list[Symbol] = list(lhs.type.data.iter_syms(shadowing_rule=ShadowingRule.allowed, name=rhs, include_magics=False))
                         if len(syms) != 1:
                             raise ValueError(f"Unable to find {rhs} in {lhs.render()}")
                         return NodeDotAccess(lhs, NodeSymbol(syms[0], syms[0].type))
@@ -1363,25 +1372,14 @@ class CompCtx:
                 raise SerqInternalError(f"Unimplemented binary op: {op}")
 
 
-    def identifier(self, tree: Tree, expected_type: Type) -> NodeOptions:
+    def identifier(self, tree: Tree, expected_type: Type) -> NodeSymbol:
         assert tree.data == "identifier", tree.data
-        val = tree.children[0].value
-
-        res = NodeOptions(self.get_unit_type()) # TODO: Could use an error type to ensure consistent analysis later
-        for sym in self.current_scope.iter_syms(val, include_imports=True):
-            if sym.type.is_alias():
-                sym = sym.definition_node.skip_safe_aliases()
-            res.options.append(NodeSymbol(sym, sym.type))
-
-        if len(res.options) > 0:
-            return res
-        # TODO: Error reporting
-        raise ValueError(f"Bad identifier: {val}")
+        name = tree.children[0].value
+        return self.current_scope.lookup_typed_sym(name, expected_type, include_imports=True, include_magics=True)
 
     def user_type(self, tree: Tree) -> NodeSymbol:
         assert tree.data in ["user_type", "return_user_type"], tree.data
-        options = self.identifier(tree.children[0], None)
-        return options.extract_unambiguous()
+        return self.identifier(tree.children[0], None)
 
     def assignment(self, tree: Tree, expected_type: Type) -> NodeAssignment:
         assert tree.data == "assignment", tree.data
@@ -1389,11 +1387,7 @@ class CompCtx:
         assert expected_type.kind == TypeKind.unit
 
         lhs = self.expression(tree.children[0], None)
-        if isinstance(lhs, NodeOptions):
-            lhs = lhs.use_first()
         rhs = self.expression(tree.children[1], lhs.type)
-        if isinstance(rhs, NodeOptions):
-            rhs = rhs.use_first()
         assert lhs.type.types_compatible(rhs.type)
 
         def report_immutable(sym: Symbol):
@@ -1440,8 +1434,6 @@ class CompCtx:
 
         val_node_expected_type = type_sym.type if type_sym != None else self.get_infer_type()
         val_node = self.expression(tree.children[f], val_node_expected_type)
-        if isinstance(val_node, NodeOptions):
-            val_node = val_node.extract_unambiguous()
         if val_node.type.kind == TypeKind.unit:
             raise ValueError(f"Type `{val_node.type.kind.name}` is not valid for `let`")
 
@@ -1483,8 +1475,6 @@ class CompCtx:
         expr = None
         if tree.children[0] != None:
             expr = self.expression(tree.children[0], self.current_deferred_ret_type)
-            if isinstance(expr, NodeOptions):
-                expr = expr.use_first()
         else:
             expr = NodeEmpty(self.current_deferred_ret_type)
         assert self.current_deferred_ret_type.types_compatible(expr.type), f"Incompatible return({expr.type.sym.render()}) for function type({self.current_deferred_ret_type.render()})"
@@ -1495,15 +1485,14 @@ class CompCtx:
         assert expected_type.kind == TypeKind.unit
 
         src = self.identifier(tree.children[1], None)
-        unambig_node = src.extract_unambiguous()
-        if not isinstance(unambig_node, NodeSymbol):
+        if not isinstance(src, NodeSymbol):
             raise ValueError("Taking an alias of something that isn't a symbol isn't allowed")
 
         alias_name = tree.children[0].children[0].value
         alias_sym = self.current_scope.put_alias(alias_name)
-        alias_sym.type.base = unambig_node.type
+        alias_sym.type.base = src.type
 
-        res_node = NodeAliasDefinition(alias_sym, unambig_node.symbol, self.get_unit_type())
+        res_node = NodeAliasDefinition(alias_sym, src.symbol, self.get_unit_type())
         alias_sym.definition_node = res_node
         return res_node
 
@@ -1513,7 +1502,7 @@ class CompCtx:
 
         is_public = tree.children[0] != None
         ident = tree.children[1].children[0].value
-        sym = self.current_scope.put_let(ident, checked=True, shallow=True)
+        sym = self.current_scope.put_struct_field(ident)
         sym.public = is_public
 
         # TODO: Assert that this is actually a type sym. Current system isn't ready yet
@@ -1533,7 +1522,9 @@ class CompCtx:
         ident = tree.children[2].children[0].value
         sym = None
         if decorator == "magic":
-            sym = self.current_scope.get_oldest_sibling().put_builtin_type(TypeKind[ident])
+            sym = self.current_scope.get_oldest_sibling().put_struct(ident)
+            sym.type = Type(kind=TypeKind[ident], sym=sym)
+            sym.magic = True
         elif decorator == "":
             sym = self.current_scope.get_oldest_sibling().put_struct(ident)
         else:
@@ -1600,7 +1591,7 @@ class CompCtx:
             assert child.data == "fn_definition_arg"
             # TODO: Mutable args
             ident = child.children[0].children[0].value
-            sym = self.current_scope.put_let(ident, shallow=True) # effectively a let that permits shallow shadowing
+            sym = self.current_scope.put_parameter(ident)
             type_node = self.user_type(child.children[1])
             sym.type = type_node.symbol.type # TODO: This is not clean at all
             params.append((NodeSymbol(sym, sym.type), type_node))
@@ -1655,11 +1646,6 @@ class CompCtx:
     def resolve_call(self, callee_node: Node, unresolved_args: list[Tree]) -> Optional[NodeFnCall]:
         def _resolve_call_impl(callee_node: Node, unresolved_args: list[Tree]) -> list[NodeFnCall]:
             match callee_node:
-                case NodeOptions():
-                    candidates = []
-                    for option in callee_node.options:
-                        candidates.extend(_resolve_call_impl(option, unresolved_args))
-                    return candidates
                 case NodeSymbol():
                     match callee_node.type.kind:
                         case TypeKind.function:
@@ -1672,8 +1658,6 @@ class CompCtx:
                                 # TODO: Do not eat errors. This makes overload resolution give the wrong error
                                 try:
                                     resolved_arg = self.expression(unresolved_args[i], formal_type)
-                                    if isinstance(resolved_arg, NodeOptions):
-                                        resolved_arg = resolved_arg.use_first()
                                     if not resolved_arg.type.types_compatible(formal_type):
                                         return []
                                     params.append(resolved_arg)
@@ -1713,8 +1697,16 @@ class CompCtx:
 
     def fn_call_expr(self, tree: Tree, expected_type: Type) -> NodeFnCall:
         assert tree.data == "fn_call_expr", tree.data
-        callee_node = self.expression(tree.children[0], None)
-        call = self.resolve_call(callee_node, tree.children[1].children if tree.children[1].children[0] != None else [])
+
+        unresolved_args: list[Tree] = tree.children[1].children if tree.children[1].children[0] != None else []
+        preliminary_arg_types: list[Type] = []
+        for unresolved_arg in unresolved_args:
+            typ = self.expression(unresolved_arg, None).type
+            preliminary_arg_types.append(typ)
+        expected_callee_type = Type(TypeKind.function, None, (preliminary_arg_types, self.get_infer_type()))
+
+        callee_node = self.expression(tree.children[0], expected_type=expected_callee_type)
+        call = self.resolve_call(callee_node, unresolved_args)
         if call == None:
             raise ValueError(f"No matching overload found for {tree.children[0].children[0].children[0].value}")
         return call
@@ -1722,13 +1714,9 @@ class CompCtx:
     def idx_op(self, tree: Tree) -> NodeIdxOp:
         assert tree.data == "idx_op", tree.data
         lhs_node = self.expression(tree.children[0], None)
-        if isinstance(lhs_node, NodeOptions):
-            lhs_node = lhs_node.extract_unambiguous()
         if not lhs_node.type.is_indexable():
             raise ValueError(f"Tried indexing into a non-indexable expression: {lhs_node.render()}: {lhs_node.type.render()}")
         idx_op = self.expression(tree.children[1], None) # TODO: Any ordinal type
-        if isinstance(idx_op, NodeOptions):
-            idx_op = idx_op.extract_unambiguous()
         if not idx_op.type.is_ordinal_type():
             raise ValueError(f"Indexing without an ordinal type is not allowed {idx_op.render()}: {idx_op.type.render()}")
         return NodeIdxOp(lhs_node, idx_op, lhs_node.type.element_type(self.graph))
@@ -1797,7 +1785,7 @@ class CompCtx:
 
     def start(self, tree: Tree) -> NodeStmtList:
         assert tree.data == "start", tree.data
-        result = NodeStmtList(self.current_scope.lookup_type("unit", shallow=True))
+        result = NodeStmtList(self.current_scope.lookup_type("unit", shadowing_rule=ShadowingRule.allowed))
         if self.module.name != MAGIC_MODULE_NAME:
             result.add(self.make_from_import_node(MAGIC_MODULE_NAME, wildcard=True))
         for child in tree.children:
@@ -1843,19 +1831,23 @@ class ModuleGraph:
         self.builtin_scope = Scope(self, module=None) # TODO: Remove
 
         # For now, unit is special because it's overused
-        unit_type_sym = self.builtin_scope.put_builtin_type(TypeKind.unit)
+        unit_type_sym = self.builtin_scope.put_struct("unit")
+        unit_type_sym.magic = True
+        unit_type_sym.type = Type(TypeKind.unit, unit_type_sym)
 
         # TODO: hack
-        magic_sym = Symbol("-1", "magic", source_module=None)
+        magic_sym = Symbol("-1", "magic", shadowing_rule=ShadowingRule.forbidden, source_module=None)
         magic_type = Type(TypeKind.magic, magic_sym)
         magic_sym.type = magic_type
 
         dbg_sym_type = Type(TypeKind.function, None, ([magic_type], unit_type_sym.type))
-        dbg_sym = self.builtin_scope.put_magic_function("dbg", dbg_sym_type)
+        dbg_sym = self.builtin_scope.put_function("dbg", dbg_sym_type)
+        dbg_sym.magic = True
         dbg_sym_type.sym = dbg_sym
 
         panic_sym_type = Type(TypeKind.function, None, ([], unit_type_sym.type))
-        panic_sym = self.builtin_scope.put_magic_function("panic", panic_sym_type)
+        panic_sym = self.builtin_scope.put_function("panic", panic_sym_type)
+        panic_sym.magic = True
         panic_sym_type.sym = panic_sym
 
 
@@ -1868,7 +1860,7 @@ class ModuleGraph:
         mod = Module(name, self._next_id, file_contents, self)
 
         # TODO: Proper sym generation
-        mod_sym = Symbol(":module:" + str(self._next_id), name, None, source_module=None)
+        mod_sym = Symbol(":module:" + str(self._next_id), name, shadowing_rule=ShadowingRule.forbidden, type=None, source_module=None)
         mod_type = Type(TypeKind.module, mod_sym, data=mod)
         mod_sym.type = mod_type
         mod.sym = mod_sym
