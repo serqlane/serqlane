@@ -12,6 +12,11 @@ python = "^3.12"
 [tool.poetry.group.test.dependencies]
 pytest = "^7.4.3"
 pytest-cov = "^4.1.0"
+
+[tool.poetry.group.fuzz]
+optional = true
+
+[tool.poetry.group.fuzz.dependencies]
 hypothesis = {extras = ["lark"], version = "^6.91.0"}
 
 [tool.poetry.scripts]
