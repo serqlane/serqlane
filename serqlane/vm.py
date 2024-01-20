@@ -389,7 +389,7 @@ class SerqVM:
                     else:
                         return_value = self.execute_node(child.else_body)
 
-                case NodeFnDefinition() | NodeImport() | NodeFromImport():  # TODO: NodeImport must be handled differently. It may set up its own types
+                case NodeFnDefinition() | NodeImport() | NodeFromImport() | NodeConst():  # TODO: NodeImport must be handled differently. It may set up its own types
                     pass  # nop
 
                 case NodeFnCall():
