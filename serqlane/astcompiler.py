@@ -653,7 +653,7 @@ class Type:
                     # TODO: Fix this for optional args
                     return False
                 for i in range(0, len(lhs_args)):
-                    if not lhs_args[i].types_compatible(rhs_args[i]):
+                    if not rhs_args[i].types_compatible(lhs_args[i]):
                         return False
                 # TODO: Generics?
                 return lhs.return_type().types_compatible(rhs.return_type())
