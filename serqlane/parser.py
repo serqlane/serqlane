@@ -111,13 +111,25 @@ class SerqParser:
         ident = self.expect([SqTokenKind.IDENTIFIER])
         return self._make_identifier(ident)
 
+    def _eat_type(self) -> Tree:
+        ident = self._eat_identifier()
+        generic_args: list[Tree] = []
+        if self.peek(0).kind == SqTokenKind.OPEN_SQUARE:
+            self.advance()
+            inner = self._eat_type()
+            generic_args.append(inner)
+            self.expect([SqTokenKind.CLOSE_SQUARE])
+        if len(generic_args) > 1:
+            raise ParserError("Received a type with more than one generic argument")
+        return Tree("type", children=[ident, generic_args[0] if len(generic_args) > 0 else None])
+
     def _eat_user_type(self) -> Tree:
         self.expect([SqTokenKind.COLON])
-        return Tree("user_type", children=[self._eat_identifier()])
+        return Tree("user_type", children=[self._eat_type()])
 
     def _eat_return_user_type(self) -> Tree:
         self.expect([SqTokenKind.ARROW])
-        return Tree("return_user_type", children=[self._eat_identifier()])
+        return Tree("return_user_type", children=[self._eat_type()])
 
     def _eat_function_args(self) -> Tree:
         result = Tree("fn_call_args")

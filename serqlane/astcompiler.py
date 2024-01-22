@@ -350,7 +350,7 @@ class NodeFnParameters(Node):
         self.args = args
 
     def render(self) -> str:
-        return ", ".join([x[0].render() + ": " + x[1].type.sym.render() for x in self.args])
+        return ", ".join([x[0].render() + ": " + x[1].type.render() for x in self.args])
 
 class NodeFnDefinition(Node):
     def __init__(self, sym: Symbol, params: NodeFnParameters, body: NodeBlockStmt, type: Type) -> None:
@@ -1505,9 +1505,24 @@ class CompCtx:
         name = tree.children[0].value
         return self.current_scope.lookup_typed_sym(name, expected_type, include_imports=True, include_magics=True)
 
+    def type(self, tree: Tree) -> NodeSymbol: # TODO: Return NodeType
+        # TODO: This is a workaround. Fix it later when actual generic instantiation becomes relevant
+        if tree.children[0].children[0].value == "ptr":
+            ptr_sym = self.current_scope.put("ptr", shadowing_rule=ShadowingRule.allowed)
+
+            inner = self.type(tree.children[1])
+            ptr_sym.type = Type(TypeKind.ptr, ptr_sym, base=inner.type)
+
+            return NodeSymbol(ptr_sym, ptr_sym.type)
+        else:
+            ident_node = self.identifier(tree.children[0], None)
+            if tree.children[1] != None:
+                assert len(tree.children[1]) == 1, "Only ptr can take a generic argument right now"
+            return ident_node
+
     def user_type(self, tree: Tree) -> NodeSymbol:
         assert tree.data in ["user_type", "return_user_type"], tree.data
-        return self.identifier(tree.children[0], None)
+        return self.type(tree.children[0])
 
     def assignment(self, tree: Tree, expected_type: Type) -> NodeAssignment:
         assert tree.data == "assignment", tree.data
