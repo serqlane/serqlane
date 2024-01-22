@@ -241,9 +241,9 @@ class SerqParser:
 
     def _descend_neg_expr(self) -> Tree:
         expr_or_op = self.peek(0)
-        if expr_or_op.kind in [SqTokenKind.MINUS, SqTokenKind.AMPERSAND]:
+        if expr_or_op.kind in [SqTokenKind.MINUS, SqTokenKind.AMPERSAND, SqTokenKind.STAR]:
             op = self._eat_operator()
-            expr = self._descend_dot_expr()
+            expr = self._descend_neg_expr()
             return self._wrap_expr(Tree("unary_expression", children=[op, expr]))
         else:
             return self._descend_dot_expr()

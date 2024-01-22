@@ -249,6 +249,10 @@ class NodePtrExpression(NodeUnaryExpression):
     def render(self) -> str:
         return f"&({self.expr.render()})"
 
+class NodeDerefExpression(NodeUnaryExpression):
+    def render(self) -> str:
+        return f"*({self.expr.render()})"
+
 
 # others
 class NodeBreak(Node):
@@ -545,7 +549,7 @@ _callable_types = frozenset([
 
 
 # TODO: Add the other appropriate types
-builtin_userspace_types = frozenset(list(_int_types) + list(_float_types) + [TypeKind.bool, TypeKind.char, TypeKind.string, TypeKind.unit])
+builtin_userspace_types = frozenset(list(_int_types) + list(_float_types) + [TypeKind.bool, TypeKind.char, TypeKind.string, TypeKind.unit, TypeKind.pointer])
 
 class Type:
     def __init__(self, kind: TypeKind, sym: Symbol, data: Any = None, *, base: Optional[Type] = None) -> None:
@@ -754,6 +758,8 @@ class Type:
         elif self.kind == TypeKind.infer:
             return "<infer>"
         elif self.kind == TypeKind.pointer:
+            return "pointer"
+        elif self.kind == TypeKind.ptr:
             return f"ptr[{self.base.render()}]"
         else:
             raise SerqInternalError(f"Render isn't implemented for type kind {self.kind}")
@@ -1572,7 +1578,7 @@ class CompCtx:
         else:
             # infer type from value
             # TODO: Instantiate types, for now only literals
-            if val_node.type.kind in builtin_userspace_types or val_node.type.kind in [TypeKind.struct, TypeKind.alias, TypeKind.pointer]:
+            if val_node.type.kind in builtin_userspace_types or val_node.type.kind in [TypeKind.struct, TypeKind.alias, TypeKind.ptr]:
                 resolved_type = val_node.type
             else:
                 # Literals infer their own types to the default if told to do so
@@ -1905,8 +1911,11 @@ class CompCtx:
                 src = expr.symbol.definition_node
                 if src == None:
                     raise SerqInternalError(f"Invalid definition node for: {expr.render()}")
-                return NodePtrExpression(expr, Type(TypeKind.pointer, sym=None, base=expr.type))
-                quit(0)
+                return NodePtrExpression(expr, Type(TypeKind.ptr, sym=None, base=expr.type))
+            case "star":
+                if not expr.type.kind == TypeKind.ptr:
+                    raise ValueError(f"Tried dereffing a non-pointer type: {expr.render()}: {expr.type.render()}")
+                return NodeDerefExpression(expr, expr.type.base)
             case _:
                 raise NotImplementedError(op)
 
