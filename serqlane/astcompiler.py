@@ -473,8 +473,9 @@ class TypeKind(Enum):
     float32 = auto()
     float64 = auto()
 
-    pointer = auto() # native sized pointer
-    reference = auto() # &T
+    pointer = auto() # void pointer
+    ptr = auto() # ptr[T] from `&x`
+    reference = auto() # ref[T]
 
     string = auto()
     array = auto() # array[T, int]
@@ -656,6 +657,10 @@ class Type:
             # magic types
 
             case TypeKind.char | TypeKind.pointer:
+                return lhs.kind == rhs.kind
+            case TypeKind.ptr:
+                if rhs.kind == TypeKind.ptr:
+                    return lhs.base.types_compatible(rhs.base)
                 return lhs.kind == rhs.kind
             case TypeKind.bool:
                 return lhs.kind == rhs.kind or rhs.kind == TypeKind.literal_bool
