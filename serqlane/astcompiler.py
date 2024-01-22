@@ -12,7 +12,7 @@ from serqlane.parser import Token, Tree, SerqParser
 from serqlane.common import SerqInternalError
 
 
-DEBUG = False
+DEBUG = True
 
 MAGIC_MODULE_NAME = "serqlib/magics"
 
@@ -834,14 +834,14 @@ class Scope:
                 yield sym
 
         # local lookup
-        for sym in self._local_syms:
+        for sym in reversed(self._local_syms):
             yield sym
 
         # sibling lookup
         # done in place because we do not want to slip through to parent multiple times
         older = self.older_sibling
         while older != None:
-            for sym in older._local_syms:
+            for sym in reversed(older._local_syms):
                 yield sym
             if older.older_sibling == None:
                 break
