@@ -125,7 +125,7 @@ class NodeLet(Node):
 
     def render(self) -> str:
         is_mut = self.sym_node.symbol.mutable or self.sym_node.symbol.hidden_mutable
-        return f"let {"mut " if is_mut else ""}{self.sym_node.render()}{": " + self.sym_node.type.sym.render()} = {self.expr.render()}"
+        return f"let {"mut " if is_mut else ""}{self.sym_node.render()}{": " + self.sym_node.type.render()} = {self.expr.render()}"
 
 class NodeConst(Node):
     def __init__(self, sym_node: NodeSymbol, expr: Node, type: Type):
@@ -245,6 +245,14 @@ class NodeNegExpression(NodeUnaryExpression):
     def render(self) -> str:
         return f"-({self.expr.render()})"
 
+class NodePtrExpression(NodeUnaryExpression):
+    def render(self) -> str:
+        return f"&({self.expr.render()})"
+
+class NodeDerefExpression(NodeUnaryExpression):
+    def render(self) -> str:
+        return f"*({self.expr.render()})"
+
 
 # others
 class NodeBreak(Node):
@@ -342,7 +350,7 @@ class NodeFnParameters(Node):
         self.args = args
 
     def render(self) -> str:
-        return ", ".join([x[0].render() + ": " + x[1].type.sym.render() for x in self.args])
+        return ", ".join([x[0].render() + ": " + x[1].type.render() for x in self.args])
 
 class NodeFnDefinition(Node):
     def __init__(self, sym: Symbol, params: NodeFnParameters, body: NodeBlockStmt, type: Type) -> None:
@@ -469,8 +477,9 @@ class TypeKind(Enum):
     float32 = auto()
     float64 = auto()
 
-    pointer = auto() # native sized pointer
-    reference = auto() # &T
+    pointer = auto() # void pointer
+    ptr = auto() # ptr[T] from `&x`
+    reference = auto() # ref[T]
 
     string = auto()
     array = auto() # array[T, int]
@@ -540,7 +549,7 @@ _callable_types = frozenset([
 
 
 # TODO: Add the other appropriate types
-builtin_userspace_types = frozenset(list(_int_types) + list(_float_types) + [TypeKind.bool, TypeKind.char, TypeKind.string, TypeKind.unit])
+builtin_userspace_types = frozenset(list(_int_types) + list(_float_types) + [TypeKind.bool, TypeKind.char, TypeKind.string, TypeKind.unit, TypeKind.pointer])
 
 class Type:
     def __init__(self, kind: TypeKind, sym: Symbol, data: Any = None, *, base: Optional[Type] = None) -> None:
@@ -644,7 +653,7 @@ class Type:
                     # TODO: Fix this for optional args
                     return False
                 for i in range(0, len(lhs_args)):
-                    if not lhs_args[i].types_compatible(rhs_args[i]):
+                    if not rhs_args[i].types_compatible(lhs_args[i]):
                         return False
                 # TODO: Generics?
                 return lhs.return_type().types_compatible(rhs.return_type())
@@ -652,6 +661,10 @@ class Type:
             # magic types
 
             case TypeKind.char | TypeKind.pointer:
+                return lhs.kind == rhs.kind
+            case TypeKind.ptr:
+                if rhs.kind == TypeKind.ptr:
+                    return lhs.base.types_compatible(rhs.base)
                 return lhs.kind == rhs.kind
             case TypeKind.bool:
                 return lhs.kind == rhs.kind or rhs.kind == TypeKind.literal_bool
@@ -744,6 +757,13 @@ class Type:
             return self.sym.definition_node.render()
         elif self.kind == TypeKind.infer:
             return "<infer>"
+        elif self.kind == TypeKind.pointer:
+            return "pointer"
+        elif self.kind == TypeKind.ptr:
+            if self.base.kind == TypeKind.struct:
+                return f"ptr[{self.base.sym.render()}]"
+            else:
+                return f"ptr[{self.base.render()}]"
         else:
             raise SerqInternalError(f"Render isn't implemented for type kind {self.kind}")
 
@@ -1488,9 +1508,24 @@ class CompCtx:
         name = tree.children[0].value
         return self.current_scope.lookup_typed_sym(name, expected_type, include_imports=True, include_magics=True)
 
+    def type(self, tree: Tree) -> NodeSymbol: # TODO: Return NodeType
+        # TODO: This is a workaround. Fix it later when actual generic instantiation becomes relevant
+        if tree.children[0].children[0].value == "ptr":
+            ptr_sym = self.current_scope.put("ptr", shadowing_rule=ShadowingRule.allowed)
+
+            inner = self.type(tree.children[1])
+            ptr_sym.type = Type(TypeKind.ptr, ptr_sym, base=inner.type)
+
+            return NodeSymbol(ptr_sym, ptr_sym.type)
+        else:
+            ident_node = self.identifier(tree.children[0], None)
+            if tree.children[1] != None:
+                assert len(tree.children[1]) == 1, "Only ptr can take a generic argument right now"
+            return ident_node
+
     def user_type(self, tree: Tree) -> NodeSymbol:
         assert tree.data in ["user_type", "return_user_type"], tree.data
-        return self.identifier(tree.children[0], None)
+        return self.type(tree.children[0])
 
     def assignment(self, tree: Tree, expected_type: Type) -> NodeAssignment:
         assert tree.data == "assignment", tree.data
@@ -1515,6 +1550,8 @@ class CompCtx:
                 assert isinstance(leftmost, NodeSymbol)
                 if not leftmost.symbol.mutable:
                     report_immutable(leftmost.symbol)
+            case NodeDerefExpression():
+                pass # TODO: Currently always mutable because you can't get evil pointers yet
             case _:
                 raise NotImplementedError()
 
@@ -1561,7 +1598,7 @@ class CompCtx:
         else:
             # infer type from value
             # TODO: Instantiate types, for now only literals
-            if val_node.type.kind in builtin_userspace_types or val_node.type.kind in [TypeKind.struct, TypeKind.alias]:
+            if val_node.type.kind in builtin_userspace_types or val_node.type.kind in [TypeKind.struct, TypeKind.alias, TypeKind.ptr]:
                 resolved_type = val_node.type
             else:
                 # Literals infer their own types to the default if told to do so
@@ -1573,11 +1610,14 @@ class CompCtx:
         sym = self.current_scope.put_let(ident, mutable=is_mut)
         sym.type = resolved_type
         sym = NodeSymbol(sym, sym.type)
-        return NodeLet(
+
+        res = NodeLet(
             sym_node=sym,
             expr=val_node,
             type=self.get_unit_type()
         )
+        res.sym_node.symbol.definition_node = res
+        return res
 
     def const_stmt(self, tree: Tree) -> NodeConst:
         assert tree.data == "const_stmt", tree.data
@@ -1885,6 +1925,27 @@ class CompCtx:
                 if not expr.type.is_arith_type():
                     raise SerqInternalError(f"Unable to negate value of type {expr.type.render()}")
                 return NodeNegExpression(expr, expr.type)
+            case "ampersand":
+                lhs = expr
+                while isinstance(lhs, NodeDotAccess):
+                    # TODO: For now a call simply means we don't have an address. Based on return type it could be valid though
+                    if isinstance(lhs.rhs, NodeFnCall):
+                        break
+                    lhs = lhs.lhs
+
+                if not isinstance(lhs, NodeSymbol):
+                    raise ValueError(f"Getting the address of an expression is currently only allowed for basic identifiers: {expr.render()}")
+                src = lhs.symbol.definition_node
+
+                if src == None:
+                    raise SerqInternalError(f"Invalid definition node for: {expr.render()}")
+                if isinstance(src, NodeLet) and not src.sym_node.symbol.mutable:
+                    raise SerqInternalError(f"Tried getting a pointer to an immutable variable: {expr.render()}")
+                return NodePtrExpression(expr, Type(TypeKind.ptr, sym=None, base=expr.type))
+            case "star":
+                if not expr.type.kind == TypeKind.ptr:
+                    raise ValueError(f"Tried dereffing a non-pointer type: {expr.render()}: {expr.type.render()}")
+                return NodeDerefExpression(expr, expr.type.base)
             case _:
                 raise NotImplementedError(op)
 

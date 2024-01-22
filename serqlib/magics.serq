@@ -21,6 +21,8 @@
 @magic pub struct string {}
 @magic pub struct char {}
 
+@magic pub struct pointer {}
+
 
 
 // Functions
