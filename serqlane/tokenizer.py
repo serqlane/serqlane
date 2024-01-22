@@ -44,6 +44,7 @@ class SqTokenKind(Enum):
     DOTDOT = ".."
     COMMA = ","
     AT = "@"
+    AMPERSAND = "&"
 
     # keywords
     TRUE = "true"

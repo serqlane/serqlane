@@ -125,7 +125,7 @@ class NodeLet(Node):
 
     def render(self) -> str:
         is_mut = self.sym_node.symbol.mutable or self.sym_node.symbol.hidden_mutable
-        return f"let {"mut " if is_mut else ""}{self.sym_node.render()}{": " + self.sym_node.type.sym.render()} = {self.expr.render()}"
+        return f"let {"mut " if is_mut else ""}{self.sym_node.render()}{": " + self.sym_node.type.render()} = {self.expr.render()}"
 
 class NodeConst(Node):
     def __init__(self, sym_node: NodeSymbol, expr: Node, type: Type):
@@ -244,6 +244,10 @@ class NodeNotExpression(NodeUnaryExpression):
 class NodeNegExpression(NodeUnaryExpression):
     def render(self) -> str:
         return f"-({self.expr.render()})"
+
+class NodePtrExpression(NodeUnaryExpression):
+    def render(self) -> str:
+        return f"&({self.expr.render()})"
 
 
 # others
@@ -744,6 +748,8 @@ class Type:
             return self.sym.definition_node.render()
         elif self.kind == TypeKind.infer:
             return "<infer>"
+        elif self.kind == TypeKind.pointer:
+            return f"ptr[{self.base.render()}]"
         else:
             raise SerqInternalError(f"Render isn't implemented for type kind {self.kind}")
 
@@ -1561,7 +1567,7 @@ class CompCtx:
         else:
             # infer type from value
             # TODO: Instantiate types, for now only literals
-            if val_node.type.kind in builtin_userspace_types or val_node.type.kind in [TypeKind.struct, TypeKind.alias]:
+            if val_node.type.kind in builtin_userspace_types or val_node.type.kind in [TypeKind.struct, TypeKind.alias, TypeKind.pointer]:
                 resolved_type = val_node.type
             else:
                 # Literals infer their own types to the default if told to do so
@@ -1573,11 +1579,14 @@ class CompCtx:
         sym = self.current_scope.put_let(ident, mutable=is_mut)
         sym.type = resolved_type
         sym = NodeSymbol(sym, sym.type)
-        return NodeLet(
+
+        res = NodeLet(
             sym_node=sym,
             expr=val_node,
             type=self.get_unit_type()
         )
+        res.sym_node.symbol.definition_node = res
+        return res
 
     def const_stmt(self, tree: Tree) -> NodeConst:
         assert tree.data == "const_stmt", tree.data
@@ -1885,6 +1894,14 @@ class CompCtx:
                 if not expr.type.is_arith_type():
                     raise SerqInternalError(f"Unable to negate value of type {expr.type.render()}")
                 return NodeNegExpression(expr, expr.type)
+            case "ampersand":
+                if not isinstance(expr, NodeSymbol):
+                    raise ValueError(f"Getting the address of an expression is currently only allowed for basic identifiers")
+                src = expr.symbol.definition_node
+                if src == None:
+                    raise SerqInternalError(f"Invalid definition node for: {expr.render()}")
+                return NodePtrExpression(expr, Type(TypeKind.pointer, sym=None, base=expr.type))
+                quit(0)
             case _:
                 raise NotImplementedError(op)
 

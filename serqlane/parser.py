@@ -155,6 +155,7 @@ class SerqParser:
             SqTokenKind.DOT,
 
             SqTokenKind.NOT,
+            SqTokenKind.AMPERSAND,
         ])
         match op.kind:
             case SqTokenKind.PLUS | SqTokenKind.MINUS | SqTokenKind.STAR | SqTokenKind.SLASH | SqTokenKind.MODULUS \
@@ -162,7 +163,7 @@ class SerqParser:
                 | SqTokenKind.GREATER | SqTokenKind.GREATEREQ | SqTokenKind.LESS | SqTokenKind.LESSEQ \
                 | SqTokenKind.AND | SqTokenKind.OR \
                 | SqTokenKind.DOT \
-                | SqTokenKind.NOT:
+                | SqTokenKind.NOT | SqTokenKind.AMPERSAND:
                 return Token(op.kind.name.lower(), op.kind.value)
             case _:
                 raise NotImplementedError(op.kind)
@@ -240,7 +241,7 @@ class SerqParser:
 
     def _descend_neg_expr(self) -> Tree:
         expr_or_op = self.peek(0)
-        if expr_or_op.kind == SqTokenKind.MINUS:
+        if expr_or_op.kind in [SqTokenKind.MINUS, SqTokenKind.AMPERSAND]:
             op = self._eat_operator()
             expr = self._descend_dot_expr()
             return self._wrap_expr(Tree("unary_expression", children=[op, expr]))
