@@ -1550,6 +1550,8 @@ class CompCtx:
                 assert isinstance(leftmost, NodeSymbol)
                 if not leftmost.symbol.mutable:
                     report_immutable(leftmost.symbol)
+            case NodeDerefExpression():
+                pass # TODO: Currently always mutable because you can't get evil pointers yet
             case _:
                 raise NotImplementedError()
 
