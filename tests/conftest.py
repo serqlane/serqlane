@@ -142,3 +142,17 @@ def multimodule_capture_first_debug(multimodule_executor) -> Callable[[ModuleMap
         return captured
 
     return execute_and_capture
+
+
+@pytest.fixture
+def capture_with_debug_hook(executor) -> Callable[[Callable[[Any], Callable[[Any], None]], str], Any]:
+    def execute_and_capture_with_hook(hook: Callable[[Any], Callable[[Any], None]], code: str) -> list[Any]:
+        captured = []
+        executor(code, debug_hook=hook(captured))
+
+        if len(captured) == 0:
+            raise RuntimeError("dbg not called")
+
+        return captured
+
+    return execute_and_capture_with_hook
