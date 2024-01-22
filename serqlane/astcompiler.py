@@ -1924,7 +1924,7 @@ class CompCtx:
                 if not isinstance(expr, NodeSymbol):
                     raise ValueError(f"Getting the address of an expression is currently only allowed for basic identifiers")
                 src = expr.symbol.definition_node
-                if src == None:
+                if src == None or not isinstance(src, NodeLet):
                     raise SerqInternalError(f"Invalid definition node for: {expr.render()}")
                 return NodePtrExpression(expr, Type(TypeKind.ptr, sym=None, base=expr.type))
             case "star":
