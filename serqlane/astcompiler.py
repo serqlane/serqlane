@@ -1226,6 +1226,7 @@ class CompCtx:
         assert tree.data in ["block_stmt", "block_expression"], tree.data
         self.open_scope()
         if len(tree.children) == 0:
+            self.close_scope()
             return NodeBlockStmt(self.get_unit_type())
 
         # Assume unit type if nothing is expected, fixed later
