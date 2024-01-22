@@ -29,6 +29,15 @@ dbg(y)
 """,
         2,
     ),
+    (
+        """
+const a = 10
+let b: int32 = a
+let c: int64 = a
+dbg(c + a)
+""",
+        20
+    )
 ]
 
 # code

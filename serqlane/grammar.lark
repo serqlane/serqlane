@@ -36,7 +36,7 @@ fn_call_expr: expression fn_call_args
 fn_call_args: "(" [expression ("," expression)*] ")"
 
 
-statement: ((return_stmt | break_stmt | continue_stmt | expression | assignment | let_stmt | import_statements) _TERMINATOR) | (struct_definition | enum_definition | alias_definition | distinct_definition | fn_definition | block_stmt | while_stmt | if_stmt)
+statement: ((return_stmt | break_stmt | continue_stmt | expression | assignment | let_stmt | const_stmt | import_statements) _TERMINATOR) | (struct_definition | enum_definition | alias_definition | distinct_definition | fn_definition | block_stmt | while_stmt | if_stmt)
 
 // For now just identifier. Later should be a generic[T] expression that handles function types and others as well
 _type: identifier // TODO: Make it visible; get rid of _ for that
@@ -44,6 +44,7 @@ _type: identifier // TODO: Make it visible; get rid of _ for that
 user_type: ":" _type
 return_user_type: "->" _type
 
+const_stmt: [pub_marker] "const" identifier [user_type] "=" expression
 let_stmt: "let" MUT? identifier user_type? "=" expression
 MUT: "mut"
 assignment: expression "=" expression

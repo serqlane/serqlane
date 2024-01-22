@@ -56,6 +56,7 @@ class SqTokenKind(Enum):
     LET = "let"
     MUT = "mut"
     PUB = "pub"
+    CONST = "const"
 
     FOR = "for"
     IN = "in"
@@ -265,6 +266,11 @@ class Tokenizer:
                     lit += cc
                     self.advance()
                 dot_count = lit.count(".")
+                if lit[-1] == ".":
+                    self.report_error(
+                        f"Numeric literal with trailing dot: {lit}",
+                        self.make_token(SqTokenKind.ERROR, lit)
+                    )
                 if dot_count == 0:
                     yield SqToken(
                         kind=SqTokenKind.INTEGER,

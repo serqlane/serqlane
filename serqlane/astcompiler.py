@@ -127,6 +127,18 @@ class NodeLet(Node):
         is_mut = self.sym_node.symbol.mutable or self.sym_node.symbol.hidden_mutable
         return f"let {"mut " if is_mut else ""}{self.sym_node.render()}{": " + self.sym_node.type.sym.render()} = {self.expr.render()}"
 
+class NodeConst(Node):
+    def __init__(self, sym_node: NodeSymbol, expr: Node, type: Type):
+        super().__init__(type)
+        self.sym_node = sym_node
+        self.expr = expr
+
+    def render(self) -> str:
+        pub_str = "pub " if self.sym_node.symbol.public else ""
+        val_t = self.sym_node.type
+        type_str = f": {val_t.render()}" if not val_t.is_literal_type() else ""
+        return f"{pub_str}const {self.sym_node.render()}{type_str} = {self.expr.render()}"
+
 class NodeAssignment(Node):
     def __init__(self, lhs: Node, rhs: Node, type: Type) -> None:
         super().__init__(type)
@@ -402,6 +414,7 @@ class Symbol:
         self.name = name
         self.type = type
         self.public = False
+        self.const = False
         self.mutable = mutable
         self.hidden_mutable = False
         self.definition_node: Node = None
@@ -1044,6 +1057,8 @@ class CompCtx:
                 return self.alias_definition(child, expected_type)
             case "let_stmt":
                 return self.let_stmt(child, expected_type)
+            case "const_stmt":
+                return self.const_stmt(child)
             case "return_stmt":
                 return self.return_stmt(child)
             case "assignment":
@@ -1417,6 +1432,9 @@ class CompCtx:
                 lhs = self.expression(tree.children[0], None)
                 rhs = tree.children[2].children[0].value
 
+                if expected_type != None and expected_type.kind == TypeKind.function and lhs.type.kind not in [TypeKind.module, TypeKind.namespace, TypeKind.struct]:
+                    expected_type.data = ([lhs.type] + expected_type.data[0], expected_type.data[1])
+
                 match lhs.type.kind:
                     case TypeKind.struct:
                         assert isinstance(lhs.type.sym.definition_node, NodeStructDefinition), "Dot operations are currently only ready for structs"
@@ -1430,18 +1448,34 @@ class CompCtx:
                                 break
                         assert matching_field_sym != None, f"Could not find {rhs} for {lhs.type.sym.render()}"
 
-                        return NodeDotAccess(lhs, NodeSymbol(matching_field_sym, matching_field_sym.type))
+                        rhs = NodeSymbol(matching_field_sym, matching_field_sym.type)
                     case TypeKind.module:
                         assert isinstance(lhs.type.data, Module)
                         rhs_sym = lhs.type.data.global_scope.lookup_typed_sym(name=rhs, expected_type=expected_type, only_public=True)
-                        return NodeDotAccess(lhs, rhs_sym)
+                        rhs = rhs_sym
                     case TypeKind.namespace:
                         syms: list[Symbol] = list(lhs.type.data.iter_syms(shadowing_rule=ShadowingRule.allowed, name=rhs, include_magics=False))
                         if len(syms) != 1:
                             raise ValueError(f"Unable to find {rhs} in {lhs.render()}")
-                        return NodeDotAccess(lhs, NodeSymbol(syms[0], syms[0].type))
+                        rhs = NodeSymbol(syms[0], syms[0].type)
                     case _:
-                        raise SerqInternalError(f"Dot operations for type kind `{lhs.type.kind.name}` are not yet allowed")
+                        if expected_type == None or expected_type.kind != TypeKind.function:
+                            raise SerqInternalError(f"Dot operations for type kind `{lhs.type.kind.name}` are not yet allowed")
+                        # A dot call of the form `x.foo(y)`. Transform it into `foo(x, y)`
+                        callsym = self.current_scope.lookup_typed_sym(name=rhs, expected_type=expected_type, include_imports=True, include_magics=True)
+                        rhs = callsym
+
+                if rhs.symbol.const:
+                    rhs_sym = rhs.symbol
+                    assert isinstance(rhs_sym.definition_node, NodeConst)
+                    assert isinstance(rhs_sym.definition_node.expr, NodeLiteral)
+                    typ = expected_type if expected_type != None else rhs_sym.definition_node.expr.type
+                    if typ.is_free_infer_type() and rhs_sym.definition_node.expr.type.is_literal_type():
+                        typ = rhs_sym.definition_node.expr.type.instantiate_literal(self.graph)
+                    res = type(rhs_sym.definition_node.expr)(rhs_sym.definition_node.expr.value, typ)
+                else:
+                    res = NodeDotAccess(lhs, rhs)
+                return res
             case _:
                 raise SerqInternalError(f"Unimplemented binary op: {op}")
 
@@ -1541,6 +1575,36 @@ class CompCtx:
             expr=val_node,
             type=self.get_unit_type()
         )
+
+    def const_stmt(self, tree: Tree) -> NodeConst:
+        assert tree.data == "const_stmt", tree.data
+        ident_node = tree.children[1]
+        assert ident_node.data == "identifier"
+        ident = ident_node.children[0].value
+
+        is_pub = tree.children[0] != None
+
+        type_sym = None if tree.children[2] == None else self.user_type(tree.children[2])
+        val_node = self.expression(tree.children[3], None)
+        if not isinstance(val_node, NodeLiteral):
+            raise ValueError("Consts only permit literal expressions right now")
+        if type_sym != None:
+            if not val_node.type.types_compatible(type_sym.type):
+                raise SerqTypeInferError(f"Incompatible types in const statement: {type_sym.type.kind} = {val_node.type.kind}")
+            val_node.type = type_sym.type
+
+        sym = self.current_scope.put_let(ident, mutable=False)
+        sym.type = val_node.type if type_sym == None else type_sym.type
+        sym.const = True
+        sym.public = is_pub
+
+        res = NodeConst(
+            sym_node=NodeSymbol(sym, sym.type),
+            expr=val_node,
+            type=self.get_unit_type(),
+        )
+        sym.definition_node = res
+        return res
 
     def return_stmt(self, tree: Tree) -> NodeReturn:
         assert tree.data == "return_stmt", tree.data
@@ -1780,6 +1844,12 @@ class CompCtx:
         expected_callee_type = Type(TypeKind.function, None, (preliminary_arg_types, self.get_infer_type()))
 
         callee_node = self.expression(tree.children[0], expected_type=expected_callee_type)
+        if callee_node.type.kind == TypeKind.function and len(callee_node.type.function_arg_types()) > len(unresolved_args):
+            if not isinstance(callee_node, NodeDotAccess):
+                raise SerqInternalError(callee_node)
+            unresolved_args = [tree.children[0].children[0].children[0]] + unresolved_args
+            callee_node = callee_node.rhs
+
         call = self.resolve_call(callee_node, unresolved_args)
         if call == None:
             raise ValueError(f"No matching overload found for {tree.children[0].children[0].children[0].value}")
@@ -1849,7 +1919,17 @@ class CompCtx:
                     result.append(self.char(child, expected_type))
 
                 case "identifier":
-                    result.append(self.identifier(child, expected_type))
+                    ident_sym_node = self.identifier(child, expected_type)
+                    if ident_sym_node.symbol.const:
+                        ident_sym = ident_sym_node.symbol
+                        assert isinstance(ident_sym.definition_node, NodeConst)
+                        assert isinstance(ident_sym.definition_node.expr, NodeLiteral)
+                        typ = expected_type if expected_type != None else ident_sym.definition_node.expr.type
+                        if typ.is_free_infer_type() and ident_sym.definition_node.expr.type.is_literal_type():
+                            typ = ident_sym.definition_node.expr.type.instantiate_literal(self.graph)
+                        result.append(type(ident_sym.definition_node.expr)(ident_sym.definition_node.expr.value, typ))
+                    else:
+                        result.append(ident_sym_node)
                 case _:
                     raise SerqInternalError(f"Unimplemented expression type: {child.data}")
         if len(result) == 1:
