@@ -12,7 +12,7 @@ from serqlane.parser import Token, Tree, SerqParser
 from serqlane.common import SerqInternalError
 
 
-DEBUG = True
+DEBUG = False
 
 MAGIC_MODULE_NAME = "serqlib/magics"
 
