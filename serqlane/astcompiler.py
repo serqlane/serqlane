@@ -760,7 +760,10 @@ class Type:
         elif self.kind == TypeKind.pointer:
             return "pointer"
         elif self.kind == TypeKind.ptr:
-            return f"ptr[{self.base.render()}]"
+            if self.base.kind == TypeKind.struct:
+                return f"ptr[{self.base.sym.render()}]"
+            else:
+                return f"ptr[{self.base.render()}]"
         else:
             raise SerqInternalError(f"Render isn't implemented for type kind {self.kind}")
 
@@ -1921,11 +1924,21 @@ class CompCtx:
                     raise SerqInternalError(f"Unable to negate value of type {expr.type.render()}")
                 return NodeNegExpression(expr, expr.type)
             case "ampersand":
-                if not isinstance(expr, NodeSymbol):
-                    raise ValueError(f"Getting the address of an expression is currently only allowed for basic identifiers")
-                src = expr.symbol.definition_node
-                if src == None or not isinstance(src, NodeLet):
+                lhs = expr
+                while isinstance(lhs, NodeDotAccess):
+                    # TODO: For now a call simply means we don't have an address. Based on return type it could be valid though
+                    if isinstance(lhs.rhs, NodeFnCall):
+                        break
+                    lhs = lhs.lhs
+
+                if not isinstance(lhs, NodeSymbol):
+                    raise ValueError(f"Getting the address of an expression is currently only allowed for basic identifiers: {expr.render()}")
+                src = lhs.symbol.definition_node
+
+                if src == None:
                     raise SerqInternalError(f"Invalid definition node for: {expr.render()}")
+                if isinstance(src, NodeLet) and not src.sym_node.symbol.mutable:
+                    raise SerqInternalError(f"Tried getting a pointer to an immutable variable: {expr.render()}")
                 return NodePtrExpression(expr, Type(TypeKind.ptr, sym=None, base=expr.type))
             case "star":
                 if not expr.type.kind == TypeKind.ptr:
