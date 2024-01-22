@@ -57,6 +57,8 @@ block_stmt: _block
 block_expression: _block
 _block: "{" statement* "}" // TODO: There is no such thing as a block expression right now
 
+range_expression: expression ".." expression
+for_stmt: "for" identifier "in" expression block_stmt
 while_stmt: "while" expression block_stmt
 if_stmt: "if" expression block_stmt ["else" block_stmt]
 

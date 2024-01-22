@@ -58,6 +58,8 @@ class SqTokenKind(Enum):
     PUB = "pub"
     CONST = "const"
 
+    FOR = "for"
+    IN = "in"
     WHILE = "while"
     IF = "if"
     ELSE = "else"

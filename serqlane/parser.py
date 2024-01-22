@@ -292,8 +292,15 @@ class SerqParser:
     def _descend_binary_expr(self) -> Tree:
         return self._descend_and_expr()
 
+
     def _eat_expression(self) -> Tree:
         return self._descend_binary_expr()
+
+    def _eat_range_expression(self) -> Tree:
+        lhs = self._eat_expression()
+        self.expect([SqTokenKind.DOTDOT])
+        rhs = self._eat_expression()
+        return Tree("range_expression", children=[lhs, rhs])
 
 
     def _eat_decorator(self) -> Tree:
@@ -476,6 +483,14 @@ class SerqParser:
         body = self._handle_block(include_open=True)
         return Tree("while_stmt", children=[cond, body])
 
+    def _eat_for_stmt(self) -> Tree:
+        self.expect([SqTokenKind.FOR])
+        capture_var = self._eat_identifier()
+        self.expect([SqTokenKind.IN])
+        range_expr = self._eat_range_expression()
+        body = self._handle_block(include_open=True)
+        return Tree("for_stmt", children=[capture_var, range_expr, body])
+
     def _eat_statement(self) -> Optional[Tree]:
         tok = self.peek(0)
         result = Tree("statement")
@@ -483,7 +498,7 @@ class SerqParser:
         if self._cur_decorator != None and tok.kind not in [SqTokenKind.FN, SqTokenKind.STRUCT, SqTokenKind.PUB]:
             raise ParserError(f"Invalid token for decorator: {tok.kind}")
         if self._cur_pub != None and tok.kind not in [SqTokenKind.FN, SqTokenKind.STRUCT, SqTokenKind.CONST]:
-            raise ParserError(f"Invalid token for pub: {tok.kind}")
+            raise ParserError(f"Invalid token for pub: {tok.kind} = {tok.literal}")
 
         match tok.kind:
             case SqTokenKind.AT:
@@ -523,6 +538,8 @@ class SerqParser:
                 result.add(self._eat_from_import())
             case SqTokenKind.WHILE:
                 result.add(self._eat_while_stmt())
+            case SqTokenKind.FOR:
+                result.add(self._eat_for_stmt())
             case SqTokenKind.BREAK:
                 result.add(Tree("break_stmt"))
                 self.advance()

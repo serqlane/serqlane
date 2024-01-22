@@ -70,10 +70,19 @@ class NodeModuleSymbol(Node):
     def render(self) -> str:
         return f"{self.symbol.render()}"
 
-class NodeStmtList(Node):
-    def __init__(self, type: Type) -> None:
+class NodeRangeExpr(Node):
+    def __init__(self, start: Node, stop: Node, type: Type) -> None:
         super().__init__(type)
-        self.children: list[Node] = []
+        self.start = start
+        self.stop = stop
+
+    def render(self) -> str:
+        return f"{self.start.render()} .. {self.stop.render()}"
+
+class NodeStmtList(Node):
+    def __init__(self, type: Type, children: Optional[list[Node]] = None) -> None:
+        super().__init__(type)
+        self.children: list[Node] = [] if children == None else children
 
     def add(self, node: Node):
         self.children.append(node)
@@ -115,7 +124,7 @@ class NodeLet(Node):
         self.expr = expr
 
     def render(self) -> str:
-        is_mut = self.sym_node.symbol.mutable
+        is_mut = self.sym_node.symbol.mutable or self.sym_node.symbol.hidden_mutable
         return f"let {"mut " if is_mut else ""}{self.sym_node.render()}{": " + self.sym_node.type.sym.render()} = {self.expr.render()}"
 
 class NodeConst(Node):
@@ -248,8 +257,8 @@ class NodeContinue(Node):
 
 
 class NodeBlockStmt(NodeStmtList):
-    def __init__(self, type: Type) -> None:
-        super().__init__(type)
+    def __init__(self, type: Type, children: Optional[list[Node]] = None) -> None:
+        super().__init__(type, children=children)
 
     def render(self) -> str:
         inner = super().render()
@@ -407,6 +416,7 @@ class Symbol:
         self.public = False
         self.const = False
         self.mutable = mutable
+        self.hidden_mutable = False
         self.definition_node: Node = None
         self.magic = magic
         self._source_module = source_module
@@ -824,14 +834,14 @@ class Scope:
                 yield sym
 
         # local lookup
-        for sym in self._local_syms:
+        for sym in reversed(self._local_syms):
             yield sym
 
         # sibling lookup
         # done in place because we do not want to slip through to parent multiple times
         older = self.older_sibling
         while older != None:
-            for sym in older._local_syms:
+            for sym in reversed(older._local_syms):
                 yield sym
             if older.older_sibling == None:
                 break
@@ -943,6 +953,12 @@ class Scope:
         sym.mutable = mutable
         return sym
 
+    # special type of let, always shadow and fake immutable
+    def put_iter_let(self, name: str) -> Symbol:
+        sym = self.put(name, shadowing_rule=ShadowingRule.allowed)
+        sym.hidden_mutable = True
+        return sym
+
     # consts are checked shallowly
     def put_const(self, name: str) -> Symbol:
         return self.put(name, shadowing_rule=ShadowingRule.shallow)
@@ -1049,6 +1065,8 @@ class CompCtx:
                 return self.assignment(child, expected_type)
             case "if_stmt":
                 return self.if_stmt(child, expected_type)
+            case "for_stmt":
+                return self.for_stmt(child, expected_type)
             case "while_stmt":
                 return self.while_stmt(child, expected_type)
             case "break_stmt" | "continue_stmt":
@@ -1112,6 +1130,68 @@ class CompCtx:
         elif tree.data == "continue_stmt":
             return NodeContinue(self.get_unit_type())
 
+    def range_expression(self, tree: Tree) -> NodeRangeExpr:
+        assert tree.data == "range_expression"
+        lhs = self.expression(tree.children[0], self.get_infer_type())
+        rhs = self.expression(tree.children[1], lhs.type)
+        if not lhs.type.is_ordinal_type() or not rhs.type.is_ordinal_type():
+            raise ValueError("Only ordinal types can be used in a for loop")
+        return NodeRangeExpr(lhs, rhs, self.get_unit_type()) # TODO: Use a range type
+
+    def for_stmt(self, tree: Tree, expected_type: Type) -> NodeStmtList:
+        assert tree.data == "for_stmt", tree.data
+        assert expected_type.kind == TypeKind.unit
+        res = NodeStmtList(self.get_unit_type())
+
+        range_expr = self.range_expression(tree.children[1])
+        iter_var = self.current_scope.put_iter_let(tree.children[0].children[0].value)
+        iter_var.type = range_expr.start.type
+        iter_var = NodeSymbol(iter_var, iter_var.type)
+        cond_node = NodeLessExpression(
+            iter_var,
+            range_expr.stop,
+            self.current_scope.lookup_type("bool", shadowing_rule=ShadowingRule.allowed)
+        )
+        res.add(NodeLet(
+            iter_var,
+            NodeMinusExpression(
+                range_expr.start,
+                NodeIntLit(1, iter_var.type),
+                iter_var.type
+            ),
+            self.get_unit_type()
+        ))
+
+        self.in_loop_counter += 1
+        body = self.handle_block(tree.children[2], self.get_unit_type())
+        self.in_loop_counter -= 1
+        else_body = NodeBlockStmt(self.get_unit_type(), children=[NodeBreak(self.get_unit_type())])
+        body.children = [
+            NodeAssignment(
+                iter_var,
+                NodePlusExpr(
+                    iter_var,
+                    NodeIntLit(1, iter_var.type),
+                    iter_var.type
+                ),
+                self.get_unit_type()
+            ),
+            NodeIfStmt(
+                cond_expr=cond_node,
+                if_body=NodeBlockStmt(body.type, body.children),
+                else_body=else_body,
+                type=self.get_unit_type()
+            )
+        ]
+
+        while_loop = NodeWhileStmt(
+            NodeBoolLit(True, self.current_scope.lookup_type("bool", shadowing_rule=ShadowingRule.allowed)),
+            body,
+            self.get_unit_type()
+        )
+
+        res.add(while_loop)
+        return res
 
     def while_stmt(self, tree: Tree, expected_type: Type) -> NodeWhileStmt:
         assert tree.data == "while_stmt", tree.data
@@ -1148,6 +1228,7 @@ class CompCtx:
         assert tree.data in ["block_stmt", "block_expression"], tree.data
         self.open_scope()
         if len(tree.children) == 0:
+            self.close_scope()
             return NodeBlockStmt(self.get_unit_type())
 
         # Assume unit type if nothing is expected, fixed later
