@@ -1354,6 +1354,9 @@ class CompCtx:
                 lhs = self.expression(tree.children[0], None)
                 rhs = tree.children[2].children[0].value
 
+                if expected_type != None and expected_type.kind == TypeKind.function and lhs.type.kind not in [TypeKind.module, TypeKind.namespace, TypeKind.struct]:
+                    expected_type.data = ([lhs.type] + expected_type.data[0], expected_type.data[1])
+
                 match lhs.type.kind:
                     case TypeKind.struct:
                         assert isinstance(lhs.type.sym.definition_node, NodeStructDefinition), "Dot operations are currently only ready for structs"
@@ -1378,7 +1381,11 @@ class CompCtx:
                             raise ValueError(f"Unable to find {rhs} in {lhs.render()}")
                         rhs = NodeSymbol(syms[0], syms[0].type)
                     case _:
-                        raise SerqInternalError(f"Dot operations for type kind `{lhs.type.kind.name}` are not yet allowed")
+                        if expected_type == None or expected_type.kind != TypeKind.function:
+                            raise SerqInternalError(f"Dot operations for type kind `{lhs.type.kind.name}` are not yet allowed")
+                        # A dot call of the form `x.foo(y)`. Transform it into `foo(x, y)`
+                        callsym = self.current_scope.lookup_typed_sym(name=rhs, expected_type=expected_type, include_imports=True, include_magics=True)
+                        rhs = callsym
 
                 if rhs.symbol.const:
                     rhs_sym = rhs.symbol
@@ -1387,9 +1394,10 @@ class CompCtx:
                     typ = expected_type if expected_type != None else rhs_sym.definition_node.expr.type
                     if typ.is_free_infer_type() and rhs_sym.definition_node.expr.type.is_literal_type():
                         typ = rhs_sym.definition_node.expr.type.instantiate_literal(self.graph)
-                    return type(rhs_sym.definition_node.expr)(rhs_sym.definition_node.expr.value, typ)
+                    res = type(rhs_sym.definition_node.expr)(rhs_sym.definition_node.expr.value, typ)
                 else:
-                    return NodeDotAccess(lhs, rhs)
+                    res = NodeDotAccess(lhs, rhs)
+                return res
             case _:
                 raise SerqInternalError(f"Unimplemented binary op: {op}")
 
@@ -1758,6 +1766,12 @@ class CompCtx:
         expected_callee_type = Type(TypeKind.function, None, (preliminary_arg_types, self.get_infer_type()))
 
         callee_node = self.expression(tree.children[0], expected_type=expected_callee_type)
+        if callee_node.type.kind == TypeKind.function and len(callee_node.type.function_arg_types()) > len(unresolved_args):
+            if not isinstance(callee_node, NodeDotAccess):
+                raise SerqInternalError(callee_node)
+            unresolved_args = [tree.children[0].children[0].children[0]] + unresolved_args
+            callee_node = callee_node.rhs
+
         call = self.resolve_call(callee_node, unresolved_args)
         if call == None:
             raise ValueError(f"No matching overload found for {tree.children[0].children[0].children[0].value}")
