@@ -1162,7 +1162,9 @@ class CompCtx:
             self.get_unit_type()
         ))
 
+        self.in_loop_counter += 1
         body = self.handle_block(tree.children[2], self.get_unit_type())
+        self.in_loop_counter -= 1
         else_body = NodeBlockStmt(self.get_unit_type(), children=[NodeBreak(self.get_unit_type())])
         body.children = [
             NodeAssignment(
