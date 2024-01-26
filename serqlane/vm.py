@@ -99,6 +99,7 @@ class SerqVM:
     def __init__(self, *, debug_hook: Callable[[Any], None] | None = None) -> None:
         self.debug_hook = debug_hook
         self.stack: list[dict[Symbol, Any]] = []
+        self.types: dict[int, Any] = {}
 
     def construct_serq_struct(self, struct: NodeStructDefinition):
         name = struct.sym.name
@@ -109,9 +110,9 @@ class SerqVM:
             match field.type.kind:
                 case TypeKind.struct:
                     try:
-                        type = self.get_value_on_stack(field.type.sym)
+                        type = self.fetch_type(field.type.hash())
                     except KeyError:
-                        raise StructNotDefined(f"{field.type.sym.name} not defined")
+                        raise StructNotDefined(f"{field.type.render()} not defined")
                 case _:
                     try:
                         # TODO: lookup other structs
@@ -229,7 +230,7 @@ class SerqVM:
                     assert isinstance(expression.callee, NodeSymbol)
 
                     try:
-                        struct = self.get_value_on_stack(expression.callee.symbol)
+                        struct = self.fetch_type(expression.callee.type.hash())
                     except KeyError:
                         definition_node = expression.callee.symbol.definition_node
 
@@ -237,9 +238,7 @@ class SerqVM:
                             definition_node
                         )
 
-                        self.push_value_on_stack(
-                            definition_node.sym, struct
-                        )
+                        self.put_type(definition_node.sym.type.hash(), struct)
 
                     # this is a ctypes.Structure type
                     return struct()
@@ -333,6 +332,12 @@ class SerqVM:
 
         raise KeyError(f"{symbol} not found in scope")
 
+    def put_type(self, id: int, typ: Type):
+        self.types[id] = typ
+
+    def fetch_type(self, id: int) -> Any:
+        return self.types[id]
+
     def execute_node(self, line: NodeStmtList):
         return_value = Unit()
         for child in line.children:
@@ -401,8 +406,9 @@ class SerqVM:
                     raise ReturnError(return_value)
 
                 case NodeStructDefinition():
-                    self.push_value_on_stack(
-                        child.sym, self.construct_serq_struct(child)
+                    self.put_type(
+                        child.sym.type.typeinst().hash(), # typeinst to skip the `type` metatype
+                        self.construct_serq_struct(child)
                     )
 
                 case _:

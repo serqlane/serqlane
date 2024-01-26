@@ -111,13 +111,16 @@ class SerqParser:
         ident = self.expect([SqTokenKind.IDENTIFIER])
         return self._make_identifier(ident)
 
+    def _eat_type(self) -> Tree:
+        return Tree("type", children=[self._eat_identifier()])
+
     def _eat_user_type(self) -> Tree:
         self.expect([SqTokenKind.COLON])
-        return Tree("user_type", children=[self._eat_identifier()])
+        return Tree("user_type", children=[self._eat_type()])
 
     def _eat_return_user_type(self) -> Tree:
         self.expect([SqTokenKind.ARROW])
-        return Tree("return_user_type", children=[self._eat_identifier()])
+        return Tree("return_user_type", children=[self._eat_type()])
 
     def _eat_function_args(self) -> Tree:
         result = Tree("fn_call_args")
