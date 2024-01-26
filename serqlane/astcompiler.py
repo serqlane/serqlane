@@ -559,7 +559,10 @@ class Type:
         self.data = data # TODO: arbitrary data for now
         self.base = base
         self.definition_node = definition_node
-        # TODO: Add a type id later
+
+    def hash(self):
+        # TODO: Smarter hashing
+        return hash((self.kind, self.data, self.base, self.definition_node))
 
     def typeinst(self) -> Type:
         assert self.kind == TypeKind.type, self.kind
