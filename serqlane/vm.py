@@ -101,7 +101,7 @@ class SerqVM:
         self.stack: list[dict[Symbol, Any]] = []
         self.types: dict[int, Any] = {}
 
-    def construct_serq_struct(self, struct: NodeStructDefinition):
+    def construct_serq_struct(self, struct: NodeStructDefinition) -> type[ctypes.Structure]:
         name = struct.sym.name
 
         fields: list[tuple[str, ctypes._SimpleCData]] = []
@@ -332,7 +332,7 @@ class SerqVM:
 
         raise KeyError(f"{symbol} not found in scope")
 
-    def put_type(self, id: int, typ: Type):
+    def put_type(self, id: int, typ: type[ctypes.Structure]):
         self.types[id] = typ
 
     def fetch_type(self, id: int) -> Any:

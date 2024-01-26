@@ -22,7 +22,7 @@
         self',
         ...
       }: let
-        python = pkgs.python312;
+        python = pkgs.python311;
         pyproject = builtins.fromTOML (builtins.readFile ./pyproject.toml);
         packageName = "serqlane";
       in {
