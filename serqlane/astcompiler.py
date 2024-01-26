@@ -1,16 +1,17 @@
 from __future__ import annotations
 
 from enum import Enum, auto
-from typing import Any, Optional, Iterator
+from typing import Any, Optional, Iterator, Generic, TypeVar
 
 import pathlib
 import hashlib
 import textwrap
-import warnings
 
 from serqlane.parser import Token, Tree, SerqParser
 from serqlane.common import SerqInternalError
 
+
+T = TypeVar("T")
 
 DEBUG = False
 
@@ -103,7 +104,7 @@ class NodeStmtList(Node):
             result.append(child.render())
         return "\n".join(result)
 
-class NodeLiteral[T](Node):
+class NodeLiteral(Node, Generic[T]):
     def __init__(self, value: T, type: Type) -> None:
         super().__init__(type) # type either gets converted from literal to actual, gets turned into an error or gets inferred from lhs
         self.value = value
@@ -121,11 +122,11 @@ class NodeBoolLit(NodeLiteral[bool]):
 
 class NodeStringLit(NodeLiteral[str]):
     def render(self) -> str:
-        return f"\"{self.value.encode("unicode_escape").decode("utf-8")}\""
+        return f'\"{self.value.encode("unicode_escape").decode("utf-8")}\"'
 
 class NodeCharLit(NodeLiteral[str]):
     def render(self) -> str:
-        return f"'{self.value.encode("unicode_escape").decode("utf-8")}'"
+        return f"'{self.value.encode('unicode_escape').decode('utf-8')}'"
 
 class NodeLet(Node):
     def __init__(self, sym_node: NodeSymbol, expr: Node, type: Type):
@@ -135,7 +136,7 @@ class NodeLet(Node):
 
     def render(self) -> str:
         is_mut = self.sym_node.symbol.mutable or self.sym_node.symbol.hidden_mutable
-        return f"let {"mut " if is_mut else ""}{self.sym_node.render()}{": " + self.sym_node.type.render()} = {self.expr.render()}"
+        return f'let {"mut " if is_mut else ""}{self.sym_node.render()}{": " + self.sym_node.type.render()} = {self.expr.render()}'
 
 class NodeConst(Node):
     def __init__(self, sym_node: NodeSymbol, expr: Node, type: Type):
@@ -272,7 +273,7 @@ class NodeBlockStmt(NodeStmtList):
 
     def render(self) -> str:
         inner = super().render()
-        return f"{{\n{textwrap.indent(inner, "  ")}\n}}"
+        return f"{{\n{textwrap.indent(inner, '  ')}\n}}"
 
 class NodeWhileStmt(Node):
     def __init__(self, cond_expr: Node, body: NodeBlockStmt, type: Type) -> None:

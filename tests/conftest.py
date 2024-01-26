@@ -1,14 +1,14 @@
 import pathlib
 
 from collections.abc import Callable
-from typing import Any
+from typing import Any, TypeAlias
 import pytest
 
 from serqlane.vm import SerqVM
 from serqlane.astcompiler import ModuleGraph, Module, MAGIC_MODULE_NAME
 
 
-type ModuleMap = dict[str, str]
+ModuleMap: TypeAlias = dict[str, str]
 
 
 # https://docs.pytest.org/en/latest/example/simple.html#control-skipping-of-tests-according-to-command-line-option
