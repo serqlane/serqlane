@@ -230,7 +230,7 @@ class SerqVM:
                     assert isinstance(expression.callee, NodeSymbol)
 
                     try:
-                        struct = self.get_value_on_stack(expression.callee.symbol)
+                        struct = self.fetch_type(expression.callee.type.hash())
                     except KeyError:
                         definition_node = expression.callee.symbol.definition_node
 
@@ -238,9 +238,7 @@ class SerqVM:
                             definition_node
                         )
 
-                        self.push_value_on_stack(
-                            definition_node.sym, struct
-                        )
+                        self.put_type(definition_node.sym.type.hash(), struct)
 
                     # this is a ctypes.Structure type
                     return struct()
